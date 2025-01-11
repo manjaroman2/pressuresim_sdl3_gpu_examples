@@ -110,28 +110,28 @@ int main(int argc, char* argv[]) {
 
     // Load shaders + create fill/line pipeline 
 
-    SDL_GPUShader* shader_vert = LoadShader(device, "RawTriangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_vert = LoadShader(device, "shaders/compiled/RawTriangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: LoadShader failed \n");
         return 1;   
     }
 
-    SDL_GPUShader* shader_frag = LoadShader(device, "SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_frag = LoadShader(device, "shaders/compiled/SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: LoadShader failed \n");
         return 1;   
     }
 
     SDL_GPUGraphicsPipelineCreateInfo pipeline_info = {
+        .vertex_shader = shader_vert,
+        .fragment_shader = shader_frag,
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
         .target_info = {
             .num_color_targets = 1,
             .color_target_descriptions = (SDL_GPUColorTargetDescription[]){{
                 .format = SDL_GetGPUSwapchainTextureFormat(device, window)
             }},
         },
-        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
-        .vertex_shader = shader_vert,
-        .fragment_shader = shader_frag,
     };  
 
     SDL_GPUGraphicsPipeline* pipeline_fill;

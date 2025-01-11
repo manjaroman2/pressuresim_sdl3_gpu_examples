@@ -112,13 +112,13 @@ int main(int argc, char* argv[]) {
 
     // Load shaders + create fill/line pipeline 
 
-    SDL_GPUShader* shader_vert = LoadShader(device, "RawTriangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_vert = LoadShader(device, "shaders/compiled/RawTriangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: LoadShader failed \n");
         return 1;   
     }
 
-    SDL_GPUShader* shader_frag = LoadShader(device, "SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_frag = LoadShader(device, "shaders/compiled/SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: LoadShader failed \n");
         return 1;   
