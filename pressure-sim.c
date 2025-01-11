@@ -58,8 +58,7 @@ SDL_GPUShader* LoadShader(
 }
 
 
-int main(int argc, char* argv[]) 
-{
+int main(int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "ERROR: SDL_Init failed: %s\n", SDL_GetError());
         return 1; 
