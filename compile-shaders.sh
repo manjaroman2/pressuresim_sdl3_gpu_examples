@@ -1,5 +1,6 @@
 #!/bin/sh
 
+mkdir -p shaders/compiled
 rm -f shaders/compiled/*
 
 set -- \
