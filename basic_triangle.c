@@ -16,12 +16,11 @@ SDL_GPUShader* LoadShader(
     Uint32 storage_buffer_count, 
     Uint32 storage_texture_count) {
 
-	if(!SDL_GetPathInfo(filename, NULL)) {
+    if(!SDL_GetPathInfo(filename, NULL)) {
         fprintf(stdout, "File (%s) does not exist.\n", filename);
-		return NULL; 	
-	}
-    
-    char full_path[256]; 
+        return NULL; 	
+    }
+        
     const char* entrypoint; 
     SDL_GPUShaderFormat backend_formats = SDL_GetGPUShaderFormats(device); 
     SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID; 
