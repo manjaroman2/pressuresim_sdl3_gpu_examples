@@ -18,7 +18,7 @@ SDL_GPUShader* LoadShader(
 
     if(!SDL_GetPathInfo(filename, NULL)) {
         fprintf(stdout, "File (%s) does not exist.\n", filename);
-        return NULL; 	
+        return NULL;    
     }
         
     const char* entrypoint; 
@@ -111,60 +111,61 @@ int main(int argc, char* argv[])
     printf("Current video driver: %s\n", SDL_GetCurrentVideoDriver());
     
 
-	// Load shaders + create fill/line pipeline 
+    // Load shaders + create fill/line pipeline 
 
     SDL_GPUShader* shader_vert = LoadShader(device, "RawTriangle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
-	if (shader_vert == NULL) {
+    if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: LoadShader failed \n");
-		return 1; 	
-	}
+        return 1;   
+    }
+
     SDL_GPUShader* shader_frag = LoadShader(device, "SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
-	if (shader_vert == NULL) {
+    if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: LoadShader failed \n");
-		return 1; 	
-	}
+        return 1;   
+    }
 
-	SDL_GPUGraphicsPipelineCreateInfo pipeline_info = {
-		.target_info = {
-			.num_color_targets = 1,
-			.color_target_descriptions = (SDL_GPUColorTargetDescription[]){{
-				.format = SDL_GetGPUSwapchainTextureFormat(device, window)
-			}},
-		},
-		.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
-		.vertex_shader = shader_vert,
-		.fragment_shader = shader_frag,
-	};	
+    SDL_GPUGraphicsPipelineCreateInfo pipeline_info = {
+        .target_info = {
+            .num_color_targets = 1,
+            .color_target_descriptions = (SDL_GPUColorTargetDescription[]){{
+                .format = SDL_GetGPUSwapchainTextureFormat(device, window)
+            }},
+        },
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .vertex_shader = shader_vert,
+        .fragment_shader = shader_frag,
+    };  
 
-	SDL_GPUGraphicsPipeline* pipeline_fill;
-	SDL_GPUGraphicsPipeline* pipeline_line;
+    SDL_GPUGraphicsPipeline* pipeline_fill;
+    SDL_GPUGraphicsPipeline* pipeline_line;
 
-	pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
-	pipeline_fill = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
-	if (pipeline_fill == NULL)
-	{
-		fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
-		return -1;
-	}
+    pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    pipeline_fill = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+    if (pipeline_fill == NULL)
+    {
+        fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
+        return -1;
+    }
 
-	pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
-	pipeline_line = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
-	if (pipeline_line == NULL)
-	{
-		fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
-		return -1;
-	}
+    pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
+    pipeline_line = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
+    if (pipeline_line == NULL)
+    {
+        fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
+        return -1;
+    }
 
-	SDL_ReleaseGPUShader(device, shader_vert); 
-	SDL_ReleaseGPUShader(device, shader_frag); 
+    SDL_ReleaseGPUShader(device, shader_vert); 
+    SDL_ReleaseGPUShader(device, shader_frag); 
 
-	// Main loop 
-	SDL_GPUViewport SmallViewport = { 160, 120, 320, 240, 0.1f, 1.0f };
-	SDL_Rect scissor_rect = { 320, 240, 320, 240 };
+    // Main loop 
+    SDL_GPUViewport SmallViewport = { 160, 120, 320, 240, 0.1f, 1.0f };
+    SDL_Rect scissor_rect = { 320, 240, 320, 240 };
 
-	bool use_wireframe_mode = false;
-	bool use_small_viewport = false;
-	bool use_scissor_rect = false;
+    bool use_wireframe_mode = false;
+    bool use_small_viewport = false;
+    bool use_scissor_rect = false;
 
     bool quit = false; 
 
@@ -194,42 +195,42 @@ int main(int argc, char* argv[])
                     break; 
             } 
         }
-		SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
-		if (cmdbuf == NULL)
-		{
-			fprintf(stderr, "ERROR: AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
-			return -1;
-		}
+        SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
+        if (cmdbuf == NULL)
+        {
+            fprintf(stderr, "ERROR: AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
+            return -1;
+        }
 
-		SDL_GPUTexture* swapchain_texture;
-		if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, window, &swapchain_texture, NULL, NULL)) {
-			fprintf(stderr, "ERROR: WaitAndAcquireGPUSwapchainTexture failed: %s\n", SDL_GetError());
-			return -1;
-		}
+        SDL_GPUTexture* swapchain_texture;
+        if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, window, &swapchain_texture, NULL, NULL)) {
+            fprintf(stderr, "ERROR: WaitAndAcquireGPUSwapchainTexture failed: %s\n", SDL_GetError());
+            return -1;
+        }
 
-		if (swapchain_texture != NULL)
-		{
-			SDL_GPUColorTargetInfo color_target_info = { 0 };
-			color_target_info.texture = swapchain_texture;
-			color_target_info.clear_color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 1.0f };
-			color_target_info.load_op = SDL_GPU_LOADOP_CLEAR;
-			color_target_info.store_op = SDL_GPU_STOREOP_STORE;
+        if (swapchain_texture != NULL)
+        {
+            SDL_GPUColorTargetInfo color_target_info = { 0 };
+            color_target_info.texture = swapchain_texture;
+            color_target_info.clear_color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 1.0f };
+            color_target_info.load_op = SDL_GPU_LOADOP_CLEAR;
+            color_target_info.store_op = SDL_GPU_STOREOP_STORE;
 
-			SDL_GPURenderPass* render_pass = SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, NULL);
-			SDL_BindGPUGraphicsPipeline(render_pass, use_wireframe_mode ? pipeline_line : pipeline_fill);
-			if (use_small_viewport)
-			{
-				SDL_SetGPUViewport(render_pass, &SmallViewport);
-			}
-			if (use_scissor_rect)
-			{
-				SDL_SetGPUScissor(render_pass, &scissor_rect);
-			}
-			SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
-			SDL_EndGPURenderPass(render_pass);
-		}
+            SDL_GPURenderPass* render_pass = SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, NULL);
+            SDL_BindGPUGraphicsPipeline(render_pass, use_wireframe_mode ? pipeline_line : pipeline_fill);
+            if (use_small_viewport)
+            {
+                SDL_SetGPUViewport(render_pass, &SmallViewport);
+            }
+            if (use_scissor_rect)
+            {
+                SDL_SetGPUScissor(render_pass, &scissor_rect);
+            }
+            SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
+            SDL_EndGPURenderPass(render_pass);
+        }
 
-		SDL_SubmitGPUCommandBuffer(cmdbuf);
+        SDL_SubmitGPUCommandBuffer(cmdbuf);
     }
 
     SDL_ReleaseGPUGraphicsPipeline(device, pipeline_fill);
