@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
     SDL_ReleaseGPUShader(device, shader_frag); 
 
     // Main loop 
-    SDL_GPUViewport SmallViewport = { 160, 120, 320, 240, 0.1f, 1.0f };
+    SDL_GPUViewport small_viewport = { 160, 120, 320, 240, 0.1f, 1.0f };
     SDL_Rect scissor_rect = { 320, 240, 320, 240 };
 
     bool use_wireframe_mode = false;
@@ -198,37 +198,38 @@ int main(int argc, char* argv[])
         SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
         if (cmdbuf == NULL)
         {
-            fprintf(stderr, "ERROR: AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
-            return -1;
+            fprintf(stderr, "ERROR: SDL_AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
+            break; 
         }
 
         SDL_GPUTexture* swapchain_texture;
         if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmdbuf, window, &swapchain_texture, NULL, NULL)) {
-            fprintf(stderr, "ERROR: WaitAndAcquireGPUSwapchainTexture failed: %s\n", SDL_GetError());
-            return -1;
+            fprintf(stderr, "ERROR: SDL_WaitAndAcquireGPUSwapchainTexture failed: %s\n", SDL_GetError());
+            break; 
         }
 
-        if (swapchain_texture != NULL)
-        {
-            SDL_GPUColorTargetInfo color_target_info = { 0 };
-            color_target_info.texture = swapchain_texture;
-            color_target_info.clear_color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 1.0f };
-            color_target_info.load_op = SDL_GPU_LOADOP_CLEAR;
-            color_target_info.store_op = SDL_GPU_STOREOP_STORE;
+		if (swapchain_texture == NULL) {
+			fprintf(stderr, "ERROR: swapchain_texture is NULL\n");
+            SDL_SubmitGPUCommandBuffer(cmdbuf);
+            break; 
+		}
 
-            SDL_GPURenderPass* render_pass = SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, NULL);
-            SDL_BindGPUGraphicsPipeline(render_pass, use_wireframe_mode ? pipeline_line : pipeline_fill);
-            if (use_small_viewport)
-            {
-                SDL_SetGPUViewport(render_pass, &SmallViewport);
-            }
-            if (use_scissor_rect)
-            {
-                SDL_SetGPUScissor(render_pass, &scissor_rect);
-            }
-            SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
-            SDL_EndGPURenderPass(render_pass);
+        SDL_GPUColorTargetInfo color_target_info = { 0 };
+        color_target_info.texture = swapchain_texture;
+        color_target_info.clear_color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 1.0f };
+        color_target_info.load_op = SDL_GPU_LOADOP_CLEAR;
+        color_target_info.store_op = SDL_GPU_STOREOP_STORE;
+
+        SDL_GPURenderPass* render_pass = SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, NULL);
+        SDL_BindGPUGraphicsPipeline(render_pass, use_wireframe_mode ? pipeline_line : pipeline_fill);
+        if (use_small_viewport) {
+            SDL_SetGPUViewport(render_pass, &small_viewport);
         }
+        if (use_scissor_rect) {
+            SDL_SetGPUScissor(render_pass, &scissor_rect);
+        }
+        SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
+        SDL_EndGPURenderPass(render_pass);
 
         SDL_SubmitGPUCommandBuffer(cmdbuf);
     }
