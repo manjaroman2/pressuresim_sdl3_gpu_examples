@@ -1,6 +1,6 @@
 ## How to 
 
-Reference: https://wiki.libsdl.org/SDL3/CategoryGPU
+Reference: https://wiki.libsdl.org/SDL3/CategoryGPU  
 Firstly, you need to install SDL3 in your system, to be able to build the main file, which is linked with -lSDL3. 
 
 To compile shaders from HLSL to SPIRV, you need to build [SDL_shadercross](https://github.com/libsdl-org/SDL_shadercross).   
