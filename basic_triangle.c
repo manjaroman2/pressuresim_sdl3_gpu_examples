@@ -1,10 +1,11 @@
+// A readable version of https://github.com/TheSpydog/SDL_gpu_examples/blob/main/Examples/BasicTriangle.c
+
 #include <stdio.h> 
 #include <stdlib.h> 
 #include <SDL3/SDL.h> 
 
 #define WINDOW_WIDTH 1200 
 #define WINDOW_HEIGHT 800 
-
 
 SDL_GPUShader* LoadShader(
     SDL_GPUDevice* device, 
