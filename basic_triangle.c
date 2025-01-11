@@ -9,7 +9,7 @@
 SDL_GPUShader* LoadShader(
     SDL_GPUDevice* device, 
     const char* filename, 
-	SDL_GPUShaderStage stage, 
+    SDL_GPUShaderStage stage, 
     Uint32 sampler_count, 
     Uint32 uniform_buffer_count, 
     Uint32 storage_buffer_count, 
