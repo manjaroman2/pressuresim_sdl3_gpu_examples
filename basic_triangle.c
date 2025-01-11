@@ -208,11 +208,11 @@ int main(int argc, char* argv[])
             break; 
         }
 
-		if (swapchain_texture == NULL) {
-			fprintf(stderr, "ERROR: swapchain_texture is NULL\n");
+        if (swapchain_texture == NULL) {
+            fprintf(stderr, "ERROR: swapchain_texture is NULL\n");
             SDL_SubmitGPUCommandBuffer(cmdbuf);
             break; 
-		}
+        }
 
         SDL_GPUColorTargetInfo color_target_info = { 0 };
         color_target_info.texture = swapchain_texture;
