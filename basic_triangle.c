@@ -142,16 +142,14 @@ int main(int argc, char* argv[])
 
     pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
     pipeline_fill = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
-    if (pipeline_fill == NULL)
-    {
+    if (pipeline_fill == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
         return -1;
     }
 
     pipeline_info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_LINE;
     pipeline_line = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
-    if (pipeline_line == NULL)
-    {
+    if (pipeline_line == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
         return -1;
     }
@@ -196,8 +194,7 @@ int main(int argc, char* argv[])
             } 
         }
         SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
-        if (cmdbuf == NULL)
-        {
+        if (cmdbuf == NULL) {
             fprintf(stderr, "ERROR: SDL_AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
             break; 
         }
