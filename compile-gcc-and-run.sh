@@ -1,3 +1,6 @@
 #!/bin/bash
 
-gcc -lSDL3 -Wall -Werror -o basic_triangle.bin basic_triangle.c && ./basic_triangle.bin
+if [ -z "$1" ]; then
+    set -- "basic_triangle" "$@"
+fi
+gcc -lSDL3 -Wall -Werror -o $1.bin $1.c && ./$1.bin

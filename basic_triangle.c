@@ -68,7 +68,7 @@ int main(int argc, char* argv[])
     } 
 
     SDL_Window* window; 
-    window = SDL_CreateWindow("pressure sim", WINDOW_WIDTH, WINDOW_HEIGHT, 0); // SDL_WINDOW_VULKAN ? 
+    window = SDL_CreateWindow("basic triangle", WINDOW_WIDTH, WINDOW_HEIGHT, 0); // SDL_WINDOW_VULKAN ? 
 
     if (window == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateWindow failed: %s\n", SDL_GetError());
