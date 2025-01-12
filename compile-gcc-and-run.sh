@@ -3,4 +3,4 @@
 if [ -z "$1" ]; then
     set -- "basic_triangle" "$@"
 fi
-gcc -lSDL3 -Wall -Werror -o $1.bin $1.c && ./$1.bin
+gcc -lSDL3 -Werror -o $1.bin $1.c && ./$1.bin
