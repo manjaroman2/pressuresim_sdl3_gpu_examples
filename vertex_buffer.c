@@ -1,3 +1,4 @@
+#include <SDL3/SDL_video.h>
 #include <stdio.h> 
 #include <stdlib.h> 
 #include <SDL3/SDL.h> 
@@ -65,39 +66,7 @@ SDL_GPUShader* load_shader(
 }
 
 
-int main(int argc, char* argv[]) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        fprintf(stderr, "ERROR: SDL_Init failed: %s\n", SDL_GetError());
-        return 1; 
-    } 
-
-    SDL_Window* window; 
-    window = SDL_CreateWindow("Pressure Simulation", WINDOW_WIDTH, WINDOW_HEIGHT, 0); // SDL_WINDOW_VULKAN ? 
-
-    if (window == NULL) {
-        fprintf(stderr, "ERROR: SDL_CreateWindow failed: %s\n", SDL_GetError());
-        return 1;  
-    }
-
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-
-    SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, NULL); 
-
-    if (device == NULL) {
-        fprintf(stderr, "ERROR: SDL_CreateGPUDevice failed: %s\n", SDL_GetError());
-        return 1; 
-    }
-
-    const char* device_driver = SDL_GetGPUDeviceDriver(device); 
-    printf("OK: Created device with driver %s\n", device_driver);
-
-    if (!SDL_ClaimWindowForGPUDevice(device, window)) {
-        fprintf(stderr, "ERROR: SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
-        return 1; 
-    }
-
-    // just some info 
-
+void print_info() {
     int render_drivers = SDL_GetNumRenderDrivers(); 
     printf("Number of render drivers: %i\n", render_drivers); 
 
@@ -113,10 +82,61 @@ int main(int argc, char* argv[]) {
     }
 
     printf("Current video driver: %s\n", SDL_GetCurrentVideoDriver());
-    
+}
+
+void handle_event(SDL_Event event, bool* quit) {
+    switch (event.type) {
+        case SDL_EVENT_QUIT:  
+            *quit = true; 
+            break; 
+        case SDL_EVENT_KEY_DOWN:
+            switch (event.key.key) {
+                case SDLK_Q:    
+                    *quit = true; 
+                    break; 
+                case SDLK_W:    
+                    break; 
+                case SDLK_S:    
+                    break; 
+                case SDLK_D:    
+                    break; 
+            }
+
+            break; 
+    } 
+}
+
+
+int main(int argc, char* argv[]) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "ERROR: SDL_Init failed: %s\n", SDL_GetError());
+        return 1; 
+    } 
+
+
+    SDL_Window* window; 
+    window = SDL_CreateWindow("Pressure Simulation", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_VULKAN);
+    if (window == NULL) {
+        fprintf(stderr, "ERROR: SDL_CreateWindow failed: %s\n", SDL_GetError());
+        return 1;  
+    }
+
+
+    SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, NULL); 
+    if (device == NULL) {
+        fprintf(stderr, "ERROR: SDL_CreateGPUDevice failed: %s\n", SDL_GetError());
+        return 1; 
+    }
+    printf("OK: Created device with driver '%s'\n", SDL_GetGPUDeviceDriver(device)); 
+
+
+    if (!SDL_ClaimWindowForGPUDevice(device, window)) {
+        fprintf(stderr, "ERROR: SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
+        return 1; 
+    }
+
 
     // Load shaders + create fill/line pipeline 
-
     SDL_GPUShader* shader_vert = load_shader(device, "shaders/compiled/PositionColor.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: load_shader failed \n");
@@ -168,11 +188,13 @@ int main(int argc, char* argv[]) {
             .num_color_targets = 1
         },
     };  
+
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
     if (pipeline == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
         return 1;
     }
+
 
     SDL_ReleaseGPUShader(device, shader_vert); 
     SDL_ReleaseGPUShader(device, shader_frag); 
@@ -199,6 +221,7 @@ int main(int argc, char* argv[]) {
 		transfer_buffer,
 		false
 	);
+
 	// 											 x    y   z    r    g    b    a 
 	transfer_data[0] = (PositionColorVertex) {  -1,  -1,  0, 255,   0,   0, 255 };
 	transfer_data[1] = (PositionColorVertex) {   1,  -1,  0,   0, 255,   0, 255 };
@@ -230,31 +253,23 @@ int main(int argc, char* argv[]) {
 	SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
 	SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
 
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+
+
+    SDL_FColor COLOR_WHITE  = (SDL_FColor) { 1.0f, 1.0f, 1.0f, 1.0f }; 
+    SDL_FColor COLOR_BLACK  = (SDL_FColor) { 0.0f, 0.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_RED    = (SDL_FColor) { 1.0f, 0.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_GREEN  = (SDL_FColor) { 0.0f, 1.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_BLUE   = (SDL_FColor) { 0.0f, 0.0f, 1.0f, 1.0f }; 
+    SDL_FColor COLOR_CYAN   = (SDL_FColor) { 0.0f, 1.0f, 1.0f, 1.0f }; 
+    SDL_FColor COLOR_YELLOW = (SDL_FColor) { 1.0f, 1.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_PINK   = (SDL_FColor) { 1.0f, 0.0f, 1.0f, 1.0f }; 
+
     bool quit = false; 
 
     while (!quit) {
         SDL_Event event;
-        if (SDL_PollEvent(&event)) {
-            switch (event.type) {
-                case SDL_EVENT_QUIT:  
-                    quit = true; 
-                    break; 
-                case SDL_EVENT_KEY_DOWN:
-                    switch (event.key.key) {
-                        case SDLK_Q:    
-                            quit = true; 
-                            break; 
-                        case SDLK_W:    
-                            break; 
-                        case SDLK_S:    
-                            break; 
-                        case SDLK_D:    
-                            break; 
-                    }
-
-                    break; 
-            } 
-        }
+        if (SDL_PollEvent(&event)) handle_event(event, &quit);  
         SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
         if (cmdbuf == NULL) {
             fprintf(stderr, "ERROR: SDL_AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
@@ -275,7 +290,7 @@ int main(int argc, char* argv[]) {
 
         SDL_GPUColorTargetInfo color_target_info = { 0 };
         color_target_info.texture = swapchain_texture;
-        color_target_info.clear_color = (SDL_FColor){ 0.0f, 0.0f, 0.0f, 1.0f };
+        color_target_info.clear_color = COLOR_BLACK;  
         color_target_info.load_op = SDL_GPU_LOADOP_CLEAR;
         color_target_info.store_op = SDL_GPU_STOREOP_STORE;
 

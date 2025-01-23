@@ -1,15 +1,15 @@
-#include <SDL3/SDL_gpu.h>
-#include <math.h>
-#include <stdio.h> 
-#include <stdlib.h> 
 #include <SDL3/SDL.h> 
+#include <stdlib.h> 
+#include <stdio.h> 
+
 
 #define WINDOW_WIDTH 1200 
 #define WINDOW_HEIGHT 800 
+#define WINDOW_TITLE "Pressure Simulation" 
 
 
 typedef struct PositionColorVertex {
-    float x, y;
+    float x, y, z;
     Uint8 r, g, b, a;
 } PositionColorVertex;
 
@@ -24,20 +24,12 @@ SDL_GPUShader* load_shader(
     Uint32 storage_texture_count) {
 
     if(!SDL_GetPathInfo(filename, NULL)) {
-        fprintf(stdout, "File does not exist: %s\n", filename);
+        fprintf(stdout, "File '%s' does not exist.\n", filename);
         return NULL;    
     }
-
-    const char* entrypoint; 
-    SDL_GPUShaderFormat backend_formats = SDL_GetGPUShaderFormats(device); 
-    SDL_GPUShaderFormat format = SDL_GPU_SHADERFORMAT_INVALID; 
-    if (backend_formats & SDL_GPU_SHADERFORMAT_SPIRV) {
-        format = SDL_GPU_SHADERFORMAT_SPIRV;
-        entrypoint = "main"; 
-    }
-
-    if (format == SDL_GPU_SHADERFORMAT_INVALID) {
-        fprintf(stderr, "ERROR: Invalid shader format: %s\n", filename);
+        
+    if (!(SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_SPIRV)) {
+        fprintf(stdout, "SDL_GPU_SHADERFORMAT_SPIRV not available.\n"); 
         return NULL; 
     }
 
@@ -51,8 +43,8 @@ SDL_GPUShader* load_shader(
     SDL_GPUShaderCreateInfo shader_info = {
         .code = code,
         .code_size = code_size,
-        .entrypoint = entrypoint,
-        .format = format,
+        .entrypoint = "main",
+        .format = SDL_GPU_SHADERFORMAT_SPIRV,
         .stage = stage,
         .num_samplers = sampler_count,
         .num_uniform_buffers = uniform_buffer_count,
@@ -69,6 +61,31 @@ SDL_GPUShader* load_shader(
     }
     SDL_free(code); 
     return shader; 
+}
+
+
+void handle_event(SDL_Event event, bool* quit, int* index_offset, int* vertex_offset) {
+    switch (event.type) {
+        case SDL_EVENT_QUIT:  
+            *quit = true; 
+            break; 
+        case SDL_EVENT_KEY_DOWN:
+            switch (event.key.key) {
+                case SDLK_Q:    
+                    *quit = true; 
+                    break; 
+                case SDLK_W:    
+                    *index_offset = (*index_offset + 1) % 4; 
+                    break; 
+                case SDLK_S:    
+                    *vertex_offset = *vertex_offset + 1; 
+                    fprintf(stdout, "%d\n", *vertex_offset); 
+                    break; 
+                case SDLK_D:    
+                    break; 
+            }
+            break; 
+    } 
 }
 
 
@@ -90,29 +107,6 @@ void print_info() {
     printf("Current video driver: %s\n", SDL_GetCurrentVideoDriver());
 }
 
-void handle_event(SDL_Event event, bool* quit) {
-    switch (event.type) {
-        case SDL_EVENT_QUIT:  
-            *quit = true; 
-            break; 
-        case SDL_EVENT_KEY_DOWN:
-            switch (event.key.key) {
-                case SDLK_Q:    
-                    *quit = true; 
-                    break; 
-                case SDLK_W:    
-                    // index_offset = (index_offset + 1) % 4; 
-                    break; 
-                case SDLK_S:    
-                    break; 
-                case SDLK_D:    
-                    break; 
-            }
-
-            break; 
-    } 
-}
-
 
 int main(int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -121,41 +115,31 @@ int main(int argc, char* argv[]) {
     } 
 
     SDL_Window* window; 
-    window = SDL_CreateWindow("Pressure Simulation", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_VULKAN);
-
+    window = SDL_CreateWindow(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_VULKAN);
     if (window == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateWindow failed: %s\n", SDL_GetError());
         return 1;  
     }
 
-    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-
-    SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV, true, NULL); 
-
+    SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL, true, NULL); 
     if (device == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateGPUDevice failed: %s\n", SDL_GetError());
         return 1; 
     }
 
-    const char* device_driver = SDL_GetGPUDeviceDriver(device); 
-    printf("OK: Created device with driver %s\n", device_driver);
-
+    printf("OK: Created device with driver '%s'\n", SDL_GetGPUDeviceDriver(device));
     if (!SDL_ClaimWindowForGPUDevice(device, window)) {
         fprintf(stderr, "ERROR: SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
         return 1; 
     }
 
-    //    print_info(); 
-
-    // Load shaders + create fill/line pipeline 
-
-    SDL_GPUShader* shader_vert = load_shader(device, "shaders/compiled/Test123.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_vert = load_shader(device, "shaders/compiled/PositionColorInstanced.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: load_shader failed \n");
         return 1;   
     }
 
-    SDL_GPUShader* shader_frag = load_shader(device, "shaders/compiled/Circle.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_frag = load_shader(device, "shaders/compiled/SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: load_shader failed \n");
         return 1;   
@@ -169,7 +153,7 @@ int main(int argc, char* argv[]) {
                 {
                     .slot = 0,
                     .pitch = sizeof(PositionColorVertex),
-                    .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX, // SDL_GPU_VERTEXINPUTRATE_INSTANCE
+                    .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
                     .instance_step_rate = 0
                 }
             }, 
@@ -178,31 +162,19 @@ int main(int argc, char* argv[]) {
                 {
                     .location = 0,
                     .buffer_slot = 0,
-                    .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,  
+                    .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3,  
                     .offset = 0                
                 }, 
                 {
                     .location = 1,
                     .buffer_slot = 0,
                     .format = SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM,
-                    .offset = sizeof(float) * 2
+                    .offset = sizeof(float) * 3
                 }
             },  
             .num_vertex_attributes = 2
-        }, 
-        .primitive_type = SDL_GPU_PRIMITIVETYPE_POINTLIST,
-        .rasterizer_state = (SDL_GPURasterizerState) {
-            .fill_mode = SDL_GPU_FILLMODE_FILL, 
-            .cull_mode = SDL_GPU_CULLMODE_NONE, 
-            .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE, 
-            .depth_bias_constant_factor = 1.0f, 
-            .depth_bias_clamp = 0.0f, 
-            .depth_bias_slope_factor = 1.0f, 
-            .enable_depth_bias = false, 
-            .enable_depth_clip = false,
-            .padding1 = 0, 
-            .padding2 = 0
-        }, 
+        },
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
         .target_info = {
             .color_target_descriptions = (SDL_GPUColorTargetDescription[]){
                 {
@@ -212,9 +184,8 @@ int main(int argc, char* argv[]) {
             .num_color_targets = 1
         },
     };  
-    printf("A\n"); 
+
     SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipeline_info);
-    printf("A\n"); 
     if (pipeline == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
         return 1;
@@ -223,22 +194,19 @@ int main(int argc, char* argv[]) {
     SDL_ReleaseGPUShader(device, shader_vert); 
     SDL_ReleaseGPUShader(device, shader_frag); 
 
-
-    size_t n_vertices = 9; 
     SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(
         device, 
         &(SDL_GPUBufferCreateInfo) {
             .usage = SDL_GPU_BUFFERUSAGE_VERTEX, 
-            .size = sizeof(PositionColorVertex) * n_vertices 
+            .size = sizeof(PositionColorVertex) * 9 // 3 triangles? 
         }
     ); 
 
-    size_t n_indices = 6;  
     SDL_GPUBuffer* index_buffer = SDL_CreateGPUBuffer(
         device, 
         &(SDL_GPUBufferCreateInfo) {
             .usage = SDL_GPU_BUFFERUSAGE_INDEX, 
-            .size = sizeof(Uint16) * n_indices 
+            .size = sizeof(Uint16) * 6 
         }
     ); 
 
@@ -246,7 +214,7 @@ int main(int argc, char* argv[]) {
         device,
         &(SDL_GPUTransferBufferCreateInfo) {
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = sizeof(PositionColorVertex) * n_vertices + sizeof(Uint16) * n_indices
+            .size = (sizeof(PositionColorVertex) * 9) + (sizeof(Uint16) * 6)
         }
     );
 
@@ -256,42 +224,32 @@ int main(int argc, char* argv[]) {
         false
     );
 
-    
-    //                                          x   y    r    g    b    a 
-    transfer_data[0] = (PositionColorVertex) { -1, -1, 255,   0,   0, 255 }; // red 
-    transfer_data[1] = (PositionColorVertex) {  1, -1,   0, 255,   0, 255 }; // green
-    transfer_data[2] = (PositionColorVertex) {  0,  1,   0,   0, 255, 255 }; // blue 
-    transfer_data[3] = (PositionColorVertex) { -1, -1, 255, 255,   0, 255 }; // yellow 
-    transfer_data[4] = (PositionColorVertex) {  1, -1, 255,   0, 255, 255 }; // pink
-    transfer_data[5] = (PositionColorVertex) {  0,  1,   0, 255, 255, 255 };
-    transfer_data[6] = (PositionColorVertex) { -1, -1, 255, 255, 255, 255 };
-    transfer_data[7] = (PositionColorVertex) {  1, -1, 255, 255, 255, 255 };
-    transfer_data[8] = (PositionColorVertex) {  0,  1, 255, 255, 255, 255 };
+
+    transfer_data[0] = (PositionColorVertex) { -1, -1, 0, 255,   0,   0, 255 };
+    transfer_data[1] = (PositionColorVertex) {  1, -1, 0,   0, 255,   0, 255 };
+    transfer_data[2] = (PositionColorVertex) {  0,  1, 0,   0,   0, 255, 255 };
+
+    transfer_data[3] = (PositionColorVertex) { -1, -1, 0, 255, 165,   0, 255 };
+    transfer_data[4] = (PositionColorVertex) {  1, -1, 0,   0, 128,   0, 255 };
+    transfer_data[5] = (PositionColorVertex) {  0,  1, 0,   0, 255, 255, 255 };
+
+    transfer_data[6] = (PositionColorVertex) { -1, -1, 0, 255, 255, 255, 255 };
+    transfer_data[7] = (PositionColorVertex) {  1, -1, 0, 255, 255, 255, 255 };
+    transfer_data[8] = (PositionColorVertex) {  0,  1, 0, 255, 255, 255, 255 };
+
+    /* transfer_data[0] = (PositionColorVertex) { -1, -1, 0, 255,   0,   0, 255 }; */ 
+    /* transfer_data[1] = (PositionColorVertex) {  1, -1, 0,   0, 255,   0, 255 }; */
+    /* transfer_data[2] = (PositionColorVertex) {  0,  1, 0,   0,   0, 255, 255 }; */
+    /* transfer_data[3] = (PositionColorVertex) { -1, -1, 0, 255, 255,   0, 255 }; */
+    /* transfer_data[4] = (PositionColorVertex) {  1, -1, 0, 255,   0, 255, 255 }; */
+    /* transfer_data[5] = (PositionColorVertex) {  0,  1, 0,   0, 255, 255, 255 }; */
+    /* transfer_data[6] = (PositionColorVertex) { -1, -1, 0, 255, 255, 255, 255 }; */
+    /* transfer_data[7] = (PositionColorVertex) {  1, -1, 0, 255, 255, 255, 255 }; */
+    /* transfer_data[8] = (PositionColorVertex) {  0,  1, 0, 255, 255, 255, 255 }; */
 
     Uint16* index_data = (Uint16*) &transfer_data[9]; 
-
-    // 0, 1, 2
-    // 1, 2, 3
-    // 2, 3, 4
-    // 3, 4, 5 
-    // 3, 4, 5 
-    /* 
-    for (Uint16 i = 0; i < n_indices; i += 1) 
-    {
+    for (Uint16 i = 0; i < 6; i += 1) 
         index_data[i] = i; 
-    } 
-    */ 
-
-    index_data[0] = 0; 
-    index_data[1] = 1; 
-    index_data[2] = 2; 
-    index_data[3] = 3; 
-    index_data[4] = 4; 
-    index_data[5] = 5; 
-    index_data[6] = 6; 
-    index_data[7] = 7; 
-
-
 
     SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
 
@@ -307,7 +265,7 @@ int main(int argc, char* argv[]) {
         &(SDL_GPUBufferRegion) {
             .buffer = vertex_buffer,
             .offset = 0,
-            .size = sizeof(PositionColorVertex) * n_vertices 
+            .size = sizeof(PositionColorVertex) * 9 
         },
         false
     );
@@ -316,12 +274,12 @@ int main(int argc, char* argv[]) {
         copy_pass,
         &(SDL_GPUTransferBufferLocation) {
             .transfer_buffer = transfer_buffer,
-            .offset = sizeof(PositionColorVertex) * n_vertices
+            .offset = sizeof(PositionColorVertex) * 9
         },
         &(SDL_GPUBufferRegion) {
             .buffer = index_buffer,
             .offset = 0,
-            .size = sizeof(Uint16) * n_indices
+            .size = sizeof(Uint16) * 6
         },
         false
     );
@@ -330,14 +288,25 @@ int main(int argc, char* argv[]) {
     SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
     SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
 
+    SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+
+    SDL_FColor COLOR_WHITE  = (SDL_FColor) { 1.0f, 1.0f, 1.0f, 1.0f }; 
+    SDL_FColor COLOR_BLACK  = (SDL_FColor) { 0.0f, 0.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_RED    = (SDL_FColor) { 1.0f, 0.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_GREEN  = (SDL_FColor) { 0.0f, 1.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_BLUE   = (SDL_FColor) { 0.0f, 0.0f, 1.0f, 1.0f }; 
+    SDL_FColor COLOR_CYAN   = (SDL_FColor) { 0.0f, 1.0f, 1.0f, 1.0f }; 
+    SDL_FColor COLOR_YELLOW = (SDL_FColor) { 1.0f, 1.0f, 0.0f, 1.0f }; 
+    SDL_FColor COLOR_PINK   = (SDL_FColor) { 1.0f, 0.0f, 1.0f, 1.0f }; 
+
     bool quit = false; 
-    // int index_offset = 0; 
-    //
-    printf("Starting main loop\n");  
+    int index_offset = 0; 
+    int vertex_offset = 0; 
 
     while (!quit) {
         SDL_Event event;
-        if (SDL_PollEvent(&event)) handle_event(event, &quit); 
+        if (SDL_PollEvent(&event)) handle_event(event, &quit, &index_offset, &vertex_offset); 
+
         SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
         if (cmdbuf == NULL) {
             fprintf(stderr, "ERROR: SDL_AcquireGPUCommandBuffer failed: %s\n", SDL_GetError());
@@ -351,19 +320,18 @@ int main(int argc, char* argv[]) {
         }
 
         if (swapchain_texture == NULL) {
-            fprintf(stderr, "ERROR: swapchain_texture is NULL\n");
+            fprintf(stderr, "ERROR: swapchain_texture is NULL.\n");
             SDL_SubmitGPUCommandBuffer(cmdbuf);
             break; 
         }
 
         SDL_GPUColorTargetInfo color_target_info = { 0 };
-        color_target_info.texture = swapchain_texture;
-        color_target_info.clear_color = (SDL_FColor){ 0.0f, 0.5f, 0.0f, 1.0f };
-        color_target_info.load_op = SDL_GPU_LOADOP_CLEAR;
-        color_target_info.store_op = SDL_GPU_STOREOP_STORE;
+        color_target_info.texture     = swapchain_texture;
+        color_target_info.clear_color = COLOR_BLACK;  
+        color_target_info.load_op     = SDL_GPU_LOADOP_CLEAR;
+        color_target_info.store_op    = SDL_GPU_STOREOP_STORE;
 
         SDL_GPURenderPass* render_pass = SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, NULL);
-        /*
         SDL_BindGPUGraphicsPipeline(render_pass, pipeline);
         SDL_BindGPUVertexBuffers(
             render_pass, 
@@ -377,14 +345,13 @@ int main(int argc, char* argv[]) {
 
         SDL_BindGPUIndexBuffer(
             render_pass, 
-            &(SDL_GPUBufferBinding) { 
+            &(SDL_GPUBufferBinding){ 
                 .buffer = index_buffer, 
                 .offset = 0 
             }, 
             SDL_GPU_INDEXELEMENTSIZE_16BIT
         );
-        SDL_DrawGPUIndexedPrimitives(render_pass, 1, 1, 0, 0, 0);
-        */ 
+        SDL_DrawGPUIndexedPrimitives(render_pass, 3, 32, index_offset, vertex_offset, 0);
         SDL_EndGPURenderPass(render_pass);
 
         SDL_SubmitGPUCommandBuffer(cmdbuf);
@@ -401,3 +368,4 @@ int main(int argc, char* argv[]) {
 
     return 0; 
 }
+
