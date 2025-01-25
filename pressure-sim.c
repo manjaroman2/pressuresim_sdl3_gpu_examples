@@ -331,7 +331,7 @@ int main(int argc, char* argv[]) {
     };
 
     float inverse_aspect_ratio = 1.0f*WINDOW_HEIGHT/WINDOW_WIDTH;
-    float radius = 5.0f; 
+    float radius = 2.0f; 
     float radius_scalar = radius/100.0f; 
     for (int i = 0; i < n_vertices; i++) {
         transfer_data[i].x *= inverse_aspect_ratio;   
@@ -382,7 +382,7 @@ int main(int argc, char* argv[]) {
     SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
 
 
-    uint n_instances = 10;
+    uint n_instances = 1000000;
     SDL_GPUBuffer* live_data_buffer = SDL_CreateGPUBuffer(
         device,
         &(SDL_GPUBufferCreateInfo) {
@@ -425,8 +425,13 @@ int main(int argc, char* argv[]) {
 
     uint sim_state = 0; 
 
-    Particle particles[n_instances];
-    memset(particles, 0, sizeof(particles));
+    Particle* particles; 
+    particles = (Particle*) calloc(n_instances, sizeof(Particle));
+
+    if (particles == NULL) {
+        printf("Memory allocation failed!\n");
+        return 1;
+    }
     for (uint i = 0; i < n_instances; i++) {
         Particle* particle = &particles[i]; 
         particle->vx = rand_float(-1.0f, 1.0f); 
@@ -529,7 +534,7 @@ int main(int argc, char* argv[]) {
             SDL_GPU_INDEXELEMENTSIZE_16BIT
         );
 
-        SDL_DrawGPUIndexedPrimitives(render_pass, n_indices, 10, 0, 0, 0);
+        SDL_DrawGPUIndexedPrimitives(render_pass, n_indices, n_instances, 0, 0, 0);
         SDL_EndGPURenderPass(render_pass);
 
         SDL_SubmitGPUCommandBuffer(cmdbuf);
