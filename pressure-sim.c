@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h> 
 #include <SDL3/SDL_gpu.h>
+#include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_surface.h>
 #include <stdlib.h> 
@@ -17,15 +18,15 @@ typedef struct PositionTextureVertex {
 
 
 typedef struct GPUParticle {
-	float x, y, z; 
-	float padding; 
+    float x, y, z; 
+    float padding; 
 } GPUParticle; 
 
 typedef struct Particle {
-	GPUParticle gpu;
-	float x, y, z; 
-	float vx, vy; 
-	float m; 
+    GPUParticle gpu;
+    float x, y, z; 
+    float vx, vy; 
+    float m; 
 } Particle; 
 
 SDL_GPUShader* load_shader(
@@ -78,7 +79,7 @@ SDL_GPUShader* load_shader(
 }
 
 
-void handle_event(SDL_Event event, bool* quit, int* index_offset, int* vertex_offset) {
+void handle_event(SDL_Event event, bool* quit, uint* sim_state) {
     switch (event.type) {
         case SDL_EVENT_QUIT:  
             *quit = true; 
@@ -89,13 +90,16 @@ void handle_event(SDL_Event event, bool* quit, int* index_offset, int* vertex_of
                     *quit = true; 
                     break; 
                 case SDLK_W:    
-                    *index_offset = (*index_offset + 1) % 4; 
                     break; 
                 case SDLK_S:    
-                    *vertex_offset = *vertex_offset + 1; 
-                    fprintf(stdout, "%d\n", *vertex_offset); 
                     break; 
                 case SDLK_D:    
+                    break; 
+                case SDLK_SPACE:    
+                    if (*sim_state == 0)
+                        *sim_state = 1; 
+                    else if (*sim_state == 1)
+                        *sim_state = 0; 
                     break; 
             }
             break; 
@@ -126,15 +130,15 @@ float rand_float(float min, float max) {
 }
 
 void physics_tick(float dt, Particle* particles, uint n_particles) {
-	for (int i = 0; i < n_particles; i++) {
-		Particle* particle = &particles[i]; 
-		particle->x += particle->vx*0.001f;  
-		particle->y += particle->vy*0.001f;  
-		/* particle->gpu.x = 1.0f*i/(n_particles-1); */ 
-		particle->gpu.x = particle->x;  
-		particle->gpu.y = particle->y;  
-		particle->gpu.z = 0.0f;  
-	}
+    for (int i = 0; i < n_particles; i++) {
+        Particle* particle = &particles[i]; 
+        particle->x += particle->vx*0.001f;  
+        particle->y += particle->vy*0.001f;  
+        /* particle->gpu.x = 1.0f*i/(n_particles-1); */ 
+        particle->gpu.x = particle->x;  
+        particle->gpu.y = particle->y;  
+        particle->gpu.z = 0.0f;  
+    }
 }
 
 
@@ -235,11 +239,11 @@ int main(int argc, char* argv[]) {
             .num_vertex_attributes = 4
         },
         .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
-		.rasterizer_state = (SDL_GPURasterizerState){
-			.cull_mode = SDL_GPU_CULLMODE_NONE,
-			.fill_mode = SDL_GPU_FILLMODE_FILL,
-			.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE
-		},
+        .rasterizer_state = (SDL_GPURasterizerState){
+            .cull_mode = SDL_GPU_CULLMODE_NONE,
+            .fill_mode = SDL_GPU_FILLMODE_FILL,
+            .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE
+        },
         .target_info = {
             .color_target_descriptions = (SDL_GPUColorTargetDescription[]){
                 {
@@ -300,40 +304,40 @@ int main(int argc, char* argv[]) {
     );
 
     PositionTextureVertex* transfer_data = SDL_MapGPUTransferBuffer(device, transfer_buffer, false);
-	
+    
     transfer_data[0] = (PositionTextureVertex) { 
          -1.0f,  1.0f,  0.0f, 
           0.0f,  1.0f, 
-		 COLOR_TO_UINT8(COLOR_RED),
-		 COLOR_TO_UINT8(COLOR_TRANSPARENT)
+         COLOR_TO_UINT8(COLOR_RED),
+         COLOR_TO_UINT8(COLOR_TRANSPARENT)
     };
     transfer_data[1] = (PositionTextureVertex) {  
         1.0f,  1.0f,  0.0f, 
         1.0f,  1.0f, 
-		COLOR_TO_UINT8(COLOR_GREEN),
-		COLOR_TO_UINT8(COLOR_TRANSPARENT)
+        COLOR_TO_UINT8(COLOR_GREEN),
+        COLOR_TO_UINT8(COLOR_TRANSPARENT)
     };
     transfer_data[2] = (PositionTextureVertex) {  
          1.0f, -1.0f,  0.0f, 
          1.0f,  0.0f, 
-		COLOR_TO_UINT8(COLOR_BLUE),
-		COLOR_TO_UINT8(COLOR_TRANSPARENT)
+        COLOR_TO_UINT8(COLOR_BLUE),
+        COLOR_TO_UINT8(COLOR_TRANSPARENT)
     };
     transfer_data[3] = (PositionTextureVertex) { 
         -1.0f, -1.0f,  0.0f, 
          0.0f,  0.0f, 
-		COLOR_TO_UINT8(COLOR_PINK),
-		COLOR_TO_UINT8(COLOR_TRANSPARENT)
+        COLOR_TO_UINT8(COLOR_PINK),
+        COLOR_TO_UINT8(COLOR_TRANSPARENT)
     };
 
     float inverse_aspect_ratio = 1.0f*WINDOW_HEIGHT/WINDOW_WIDTH;
-	float radius = 5.0f; 
-	float radius_scalar = radius/100.0f; 
+    float radius = 5.0f; 
+    float radius_scalar = radius/100.0f; 
     for (int i = 0; i < n_vertices; i++) {
-		transfer_data[i].x *= inverse_aspect_ratio;   
-		transfer_data[i].x *= radius_scalar;  
-		transfer_data[i].y *= radius_scalar;  
-	}
+        transfer_data[i].x *= inverse_aspect_ratio;   
+        transfer_data[i].x *= radius_scalar;  
+        transfer_data[i].y *= radius_scalar;  
+    }
 
     Uint16* index_data = (Uint16*) &transfer_data[n_vertices];
     index_data[0] = 2;
@@ -379,21 +383,21 @@ int main(int argc, char* argv[]) {
 
 
     uint n_instances = 10;
-	SDL_GPUBuffer* live_data_buffer = SDL_CreateGPUBuffer(
-		device,
-		&(SDL_GPUBufferCreateInfo) {
-			.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
-			.size = n_instances * sizeof(GPUParticle)
-		}
-	);
+    SDL_GPUBuffer* live_data_buffer = SDL_CreateGPUBuffer(
+        device,
+        &(SDL_GPUBufferCreateInfo) {
+            .usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
+            .size = n_instances * sizeof(GPUParticle)
+        }
+    );
 
     SDL_GPUTransferBuffer* live_data_tranfer_buffer = SDL_CreateGPUTransferBuffer(
-		device,
-		&(SDL_GPUTransferBufferCreateInfo) {
-			.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-			.size = n_instances * sizeof(GPUParticle)
-		}
-	);
+        device,
+        &(SDL_GPUTransferBufferCreateInfo) {
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = n_instances * sizeof(GPUParticle)
+        }
+    );
 
 
     // 
@@ -417,20 +421,22 @@ int main(int argc, char* argv[]) {
     int index_offset  = 0; 
     int vertex_offset = 0; 
 
-	float dt = 0.0f; 
+    float dt = 0.0f; 
 
-	Particle particles[n_instances];
-	memset(particles, 0, sizeof(particles));
-	for (uint i = 0; i < n_instances; i++) {
-		Particle* particle = &particles[i]; 
+    uint sim_state = 0; 
+
+    Particle particles[n_instances];
+    memset(particles, 0, sizeof(particles));
+    for (uint i = 0; i < n_instances; i++) {
+        Particle* particle = &particles[i]; 
         particle->vx = rand_float(-1.0f, 1.0f); 
         particle->vy = rand_float(-1.0f, 1.0f); 
-	}
+    }
 
     while (!quit) {
         SDL_Event event;
         if (SDL_PollEvent(&event)) 
-            handle_event(event, &quit, &index_offset, &vertex_offset); 
+            handle_event(event, &quit, &sim_state); 
 
         SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
         if (cmdbuf == NULL) {
@@ -449,42 +455,44 @@ int main(int argc, char* argv[]) {
             SDL_SubmitGPUCommandBuffer(cmdbuf);
             break; 
         }
-		
-		physics_tick(dt, particles, n_instances); 
+        
+        if (sim_state == 1) {
+            physics_tick(dt, particles, n_instances); 
+        }
 
-		GPUParticle* live_data = SDL_MapGPUTransferBuffer(
-			device,
-			live_data_tranfer_buffer,
-			true
-		);
+        GPUParticle* live_data = SDL_MapGPUTransferBuffer(
+            device,
+            live_data_tranfer_buffer,
+            true
+        );
 
-		// Write to live_data here! 
-		for (uint i = 0; i < n_instances; i+=1) {
-			live_data[i].x = particles[i].gpu.x;
-			live_data[i].y = particles[i].gpu.y;
-			live_data[i].z = particles[i].gpu.z; 
-		}
+        // Write to live_data here! 
+        for (uint i = 0; i < n_instances; i+=1) {
+            live_data[i].x = particles[i].gpu.x;
+            live_data[i].y = particles[i].gpu.y;
+            live_data[i].z = particles[i].gpu.z; 
+        }
 
-		/* for (Uint32 i = 0; i < n_instances; i+=1) { */
-		/* 	printf("%d x=%f y=%f z=%f\n", i, live_data[i].x, live_data[i].y, live_data[i].z); */
-		/* } */
-		SDL_UnmapGPUTransferBuffer(device, live_data_tranfer_buffer); 
+        /* for (Uint32 i = 0; i < n_instances; i+=1) { */
+        /*  printf("%d x=%f y=%f z=%f\n", i, live_data[i].x, live_data[i].y, live_data[i].z); */
+        /* } */
+        SDL_UnmapGPUTransferBuffer(device, live_data_tranfer_buffer); 
 
-		SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmdbuf);
-		SDL_UploadToGPUBuffer(
-			copy_pass,
-			&(SDL_GPUTransferBufferLocation) {
-				.transfer_buffer = live_data_tranfer_buffer,
-				.offset = 0
-			},
-			&(SDL_GPUBufferRegion) {
-				.buffer = live_data_buffer,
-				.offset = 0,
-				.size = sizeof(GPUParticle) * n_instances
-			},
-		    false 	
-		);
-		SDL_EndGPUCopyPass(copy_pass);
+        SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmdbuf);
+        SDL_UploadToGPUBuffer(
+            copy_pass,
+            &(SDL_GPUTransferBufferLocation) {
+                .transfer_buffer = live_data_tranfer_buffer,
+                .offset = 0
+            },
+            &(SDL_GPUBufferRegion) {
+                .buffer = live_data_buffer,
+                .offset = 0,
+                .size = sizeof(GPUParticle) * n_instances
+            },
+            false   
+        );
+        SDL_EndGPUCopyPass(copy_pass);
 
         SDL_GPUColorTargetInfo color_target_info = { 0 };
         color_target_info.texture     = swapchain_texture;
@@ -506,12 +514,12 @@ int main(int argc, char* argv[]) {
             }, 
             1
         ); 
-		SDL_BindGPUVertexStorageBuffers(
-			render_pass,
-			0,
-			&live_data_buffer,
-			1
-		);
+        SDL_BindGPUVertexStorageBuffers(
+            render_pass,
+            0,
+            &live_data_buffer,
+            1
+        );
         SDL_BindGPUIndexBuffer(
             render_pass, 
             &(SDL_GPUBufferBinding) { 
@@ -530,7 +538,7 @@ int main(int argc, char* argv[]) {
     SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
     SDL_ReleaseGPUBuffer(device, vertex_buffer); 
     SDL_ReleaseGPUBuffer(device, index_buffer); 
-	SDL_ReleaseGPUTransferBuffer(device, live_data_tranfer_buffer); 
+    SDL_ReleaseGPUTransferBuffer(device, live_data_tranfer_buffer); 
     SDL_ReleaseGPUBuffer(device, live_data_buffer); 
 
     SDL_ReleaseWindowFromGPUDevice(device, window);
