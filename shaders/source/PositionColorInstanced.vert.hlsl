@@ -9,6 +9,8 @@ struct Output
 {
     float4 Color : TEXCOORD0;
     float4 Position : SV_Position;
+    [[vk::builtin("PointSize")]]
+	float PointSize : PSIZE0; 
 };
 
 Output main(Input input)
@@ -19,5 +21,6 @@ Output main(Input input)
     pos.x += (float(input.InstanceIndex % 4) * 0.5f);
     pos.y += (floor(float(input.InstanceIndex / 4)) * 0.5f);
     output.Position = float4(pos, 1.0f);
+	output.PointSize = 40.0f; 
     return output;
 }

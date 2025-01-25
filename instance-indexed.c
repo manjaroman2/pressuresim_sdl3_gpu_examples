@@ -1,11 +1,12 @@
 #include <SDL3/SDL.h> 
+#include <SDL3/SDL_gpu.h>
 #include <stdlib.h> 
 #include <stdio.h> 
 
 
-#define WINDOW_WIDTH 1200 
-#define WINDOW_HEIGHT 800 
-#define WINDOW_TITLE "Pressure Simulation" 
+#define WINDOW_WIDTH  1400 
+#define WINDOW_HEIGHT 1000 
+#define WINDOW_TITLE  "Pressure Simulation" 
 
 
 typedef struct PositionColorVertex {
@@ -135,13 +136,13 @@ int main(int argc, char* argv[]) {
 
     SDL_GPUShader* shader_vert = load_shader(device, "shaders/compiled/PositionColorInstanced.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
-        fprintf(stderr, "ERROR: load_shader failed \n");
+        fprintf(stderr, "ERROR: load_shader failed.\n");
         return 1;   
     }
 
-    SDL_GPUShader* shader_frag = load_shader(device, "shaders/compiled/SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_frag = load_shader(device, "shaders/compiled/Circle.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
-        fprintf(stderr, "ERROR: load_shader failed \n");
+        fprintf(stderr, "ERROR: load_shader failed.\n");
         return 1;   
     }
 
@@ -174,7 +175,7 @@ int main(int argc, char* argv[]) {
             },  
             .num_vertex_attributes = 2
         },
-        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_POINTLIST,
         .target_info = {
             .color_target_descriptions = (SDL_GPUColorTargetDescription[]){
                 {
@@ -194,11 +195,14 @@ int main(int argc, char* argv[]) {
     SDL_ReleaseGPUShader(device, shader_vert); 
     SDL_ReleaseGPUShader(device, shader_frag); 
 
+	Uint16 n_vertices = 9; 
+	Uint16 n_indices  = 6; 
+
     SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(
         device, 
         &(SDL_GPUBufferCreateInfo) {
             .usage = SDL_GPU_BUFFERUSAGE_VERTEX, 
-            .size = sizeof(PositionColorVertex) * 9 // 3 triangles? 
+            .size = sizeof(PositionColorVertex) * n_vertices
         }
     ); 
 
@@ -206,7 +210,7 @@ int main(int argc, char* argv[]) {
         device, 
         &(SDL_GPUBufferCreateInfo) {
             .usage = SDL_GPU_BUFFERUSAGE_INDEX, 
-            .size = sizeof(Uint16) * 6 
+            .size = sizeof(Uint16) * n_indices 
         }
     ); 
 
@@ -214,7 +218,7 @@ int main(int argc, char* argv[]) {
         device,
         &(SDL_GPUTransferBufferCreateInfo) {
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = (sizeof(PositionColorVertex) * 9) + (sizeof(Uint16) * 6)
+            .size = (sizeof(PositionColorVertex) * n_vertices) + (sizeof(Uint16) * n_indices)
         }
     );
 
@@ -223,6 +227,7 @@ int main(int argc, char* argv[]) {
         transfer_buffer,
         false
     );
+
 
 
     transfer_data[0] = (PositionColorVertex) { -1, -1, 0, 255,   0,   0, 255 };
@@ -247,8 +252,8 @@ int main(int argc, char* argv[]) {
     /* transfer_data[7] = (PositionColorVertex) {  1, -1, 0, 255, 255, 255, 255 }; */
     /* transfer_data[8] = (PositionColorVertex) {  0,  1, 0, 255, 255, 255, 255 }; */
 
-    Uint16* index_data = (Uint16*) &transfer_data[9]; 
-    for (Uint16 i = 0; i < 6; i += 1) 
+    Uint16* index_data = (Uint16*) &transfer_data[n_vertices]; 
+    for (Uint16 i = 0; i < n_indices; i += 1) 
         index_data[i] = i; 
 
     SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
@@ -265,7 +270,7 @@ int main(int argc, char* argv[]) {
         &(SDL_GPUBufferRegion) {
             .buffer = vertex_buffer,
             .offset = 0,
-            .size = sizeof(PositionColorVertex) * 9 
+            .size = sizeof(PositionColorVertex) * n_vertices 
         },
         false
     );
@@ -274,12 +279,12 @@ int main(int argc, char* argv[]) {
         copy_pass,
         &(SDL_GPUTransferBufferLocation) {
             .transfer_buffer = transfer_buffer,
-            .offset = sizeof(PositionColorVertex) * 9
+            .offset = sizeof(PositionColorVertex) * n_vertices
         },
         &(SDL_GPUBufferRegion) {
             .buffer = index_buffer,
             .offset = 0,
-            .size = sizeof(Uint16) * 6
+            .size = sizeof(Uint16) * n_indices
         },
         false
     );
@@ -327,7 +332,7 @@ int main(int argc, char* argv[]) {
 
         SDL_GPUColorTargetInfo color_target_info = { 0 };
         color_target_info.texture     = swapchain_texture;
-        color_target_info.clear_color = COLOR_BLACK;  
+        color_target_info.clear_color = COLOR_WHITE;  
         color_target_info.load_op     = SDL_GPU_LOADOP_CLEAR;
         color_target_info.store_op    = SDL_GPU_STOREOP_STORE;
 
@@ -351,7 +356,7 @@ int main(int argc, char* argv[]) {
             }, 
             SDL_GPU_INDEXELEMENTSIZE_16BIT
         );
-        SDL_DrawGPUIndexedPrimitives(render_pass, 3, 32, index_offset, vertex_offset, 0);
+        SDL_DrawGPUIndexedPrimitives(render_pass, 3, 3, index_offset, vertex_offset, 0);
         SDL_EndGPURenderPass(render_pass);
 
         SDL_SubmitGPUCommandBuffer(cmdbuf);
