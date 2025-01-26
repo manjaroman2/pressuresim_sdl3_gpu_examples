@@ -1,10 +1,16 @@
 #include <SDL3/SDL.h> 
 #include <stdlib.h> 
 #include <stdio.h> 
-#include <strings.h>
 
 #define COLOR_TO_UINT8(color) {(Uint8)((color).r * 255), (Uint8)((color).g * 255), (Uint8)((color).b * 255), (Uint8)((color).a * 255)}
 #define RGBA_TO_FLOAT(r, g, b, a) ((float)(r) / 255.0f), ((float)(g) / 255.0f), ((float)(b) / 255.0f), ((float)(a) / 255.0f)
+#define BOX_UNPACK(box) box.l, box.r, box.b, box.t
+
+#define N 10 
+#define R 10.0f 
+#define WINDOW_WIDTH  1200
+#define WINDOW_HEIGHT 1000 
+
 
 typedef struct PositionTextureVertex {
     float x, y, z;
@@ -20,12 +26,60 @@ typedef struct GPUParticle {
 } GPUParticle; 
 
 
-typedef struct Particle {
+typedef struct Box {
+    float l, r, b, t; 
+} Box; 
+
+
+bool box_overlap(Box b1, Box b2) {
+    return (
+        b1.r >= b2.l &&  
+        b1.l <= b2.r &&  
+        b1.t >= b2.b && 
+        b1.b <= b2.t);
+}
+
+
+typedef struct Vec2ui {
+    uint x, y; 
+} Vec2ui; 
+
+
+typedef struct Vec2f {
+    float x, y; 
+} Vec2f; 
+
+
+typedef struct ChunkNeighbors ChunkNeighbors; 
+typedef struct Particle Particle; 
+
+
+typedef struct Chunk {
+    Box box;
+    struct ChunkNeighbors* neighbors; 
+    Particle** particles; 
+    uint n_filled; 
+    uint n_free; 
+} Chunk; 
+
+
+struct ChunkNeighbors {
+    Chunk* left; 
+    Chunk* right; 
+    Chunk* bottom; 
+    Chunk* top; 
+}; 
+
+
+struct Particle {
     GPUParticle gpu;
     float x, y, z; // like world coords  
+    Box box; 
+    Chunk* chunks[4]; 
+    Uint8 n_chunks;
     float vx, vy; 
     float m; 
-} Particle; 
+}; 
 
 
 typedef struct Container {
@@ -33,6 +87,35 @@ typedef struct Container {
     float zoom, inverse_aspect_ratio, scalar; 
 } Container; 
 
+
+int chunk_add_particle(Chunk* chunk, Particle* p) {
+    printf("chunk_add\n");
+    if (chunk->n_free == 0) {
+        chunk->particles = realloc(chunk->particles, 2 * chunk->n_filled * sizeof(Particle*));
+        if (chunk->particles == NULL) {
+            fprintf(stderr, "ERROR: Chunk reallocation failed.\n");
+            return -1; 
+        }
+        chunk->n_free = chunk->n_filled;
+    } 
+    chunk->particles[chunk->n_filled] = p; 
+    printf("chunk_add %d %d\n", chunk->n_filled, chunk->n_free);
+    chunk->n_filled++; 
+    chunk->n_free--;
+    printf("chunk_add %d %d\n", chunk->n_filled, chunk->n_free);
+    return 0; 
+}
+
+
+int chunk_remove_particle(Chunk* chunk, uint i) {
+    printf("chunk_remove\n");
+    chunk->n_filled--;
+    chunk->particles[i] = chunk->particles[chunk->n_filled]; 
+    chunk->particles[chunk->n_filled] = NULL;
+    chunk->n_free++;
+    printf("chunk_remove\n");
+    return 0; 
+}
 
 SDL_GPUShader* load_shader(
     SDL_GPUDevice* device, 
@@ -112,74 +195,297 @@ void handle_event(SDL_Event event, bool* quit, uint* sim_state) {
 }
 
 
-void print_device_driver_info() {
-    int render_drivers = SDL_GetNumRenderDrivers(); 
-    printf("Number of render drivers: %i\n", render_drivers); 
-
-    for (int i = 0; i < render_drivers; i++) {
-        printf("Render driver #%i: %s\n", i, SDL_GetRenderDriver(i)); 
-    }
-
-    int video_drivers = SDL_GetNumVideoDrivers(); 
-    printf("Number of video drivers: %i\n", video_drivers); 
-
-    for (int i = 0; i < video_drivers; i++) {
-        printf("Video driver #%i: %s\n", i, SDL_GetVideoDriver(i)); 
-    }
-
-    printf("Current video driver: %s\n", SDL_GetCurrentVideoDriver());
-}
-
-
 float rand_float(float min, float max) {
     return min + (max - min) * (rand() / (float)RAND_MAX);
 }
 
 
-void physics_tick(float dt, Particle* particles, uint n_particles) {
-    for (int i = 0; i < n_particles; i++) {
-        Particle* particle = &particles[i]; 
-        particle->x += particle->vx*dt;  
-        particle->y += particle->vy*dt;  
-        particle->gpu.x = particle->x;  
-        particle->gpu.y = particle->y;  
-        particle->gpu.z = 0.0f;  
-    }
+void collide(Particle* p1, Particle* p2) {
+
 }
 
 
-int setup_particles(Particle* particles, uint n_particles, float particle_radius, Container* container) {
-    /* uint n_particles_possible = container->width*container->height/(4*particle_radius*particle_radius); */ 
-    /* if (n_particles_possible < n_particles) { */
-    /*     fprintf(stderr, "Too many particles %d for container %d\n", n_particles, n_particles_possible); */ 
-    /*     return -1; */ 
-    /* } */
-    /* int particles_per_row = (container->width - particle_radius) / (8 * particle_radius); */
+int physics_tick(float dt, Particle* particles, uint n_particles, float p_radius, Container* container, Chunk** chunkmap, Vec2ui chunks, Chunk** border_chunks, uint n_border_chunks) {
+    //  we iterate in a grid pattern:
+    //  
+    //  x x x x 
+    //  x x x x 
+    //  x x x x 
+    //  
+    //  o x o x 
+    //  x o x o 
+    //  o x o x 
+    //
 
-    int particles_per_row = (1.0f/(particle_radius*container->scalar)-0.5f);
-    printf("%f %f\n", container->scalar, container->zoom);
+    for (uint i = 0; i < chunks.x; i++) {
+        for (uint j = i%2; j < chunks.y; j+=2) {
+            Chunk chunk = chunkmap[i][j];
+            for (uint k = 0; k < chunk.n_filled; k++) {
+                Particle* p = chunk.particles[k]; 
+                for (uint l = 0; l < k; l++) {
+                    collide(p, chunk.particles[l]);
+                }
+                for (uint l = k+1; l < chunk.n_filled; l++) {
+                    collide(p, chunk.particles[l]);
+                }
+                if (chunk.neighbors->left != NULL) {
+                    Chunk* neighbor = chunk.neighbors->left; 
+                    for (uint l = 0; l < neighbor->n_filled; l++) {
+                        collide(p, neighbor->particles[l]);
+                    }
+                }
+                if (chunk.neighbors->right != NULL) {
+                    Chunk* neighbor = chunk.neighbors->right; 
+                    for (uint l = 0; l < neighbor->n_filled; l++) {
+                        collide(p, neighbor->particles[l]);
+                    }
+                }
+                if (chunk.neighbors->bottom != NULL) {
+                    Chunk* neighbor = chunk.neighbors->bottom; 
+                    for (uint l = 0; l < neighbor->n_filled; l++) {
+                        collide(p, neighbor->particles[l]);
+                    }
+                } 
+                if (chunk.neighbors->top != NULL) {
+                    Chunk* neighbor = chunk.neighbors->top; 
+                    for (uint l = 0; l < neighbor->n_filled; l++) {
+                        collide(p, neighbor->particles[l]);
+                    }
+                } 
+            }
+        }
+    }
 
+    for (uint i = 0; i < n_border_chunks; i++) {
+        Chunk* chunk = border_chunks[i]; 
+        printf("(%d) %d\n", i, chunk->n_filled); 
+        for (uint j = 0; j < chunk->n_filled; j++) {
+            printf("%d %d %d\n", j, chunk->n_filled, chunk->n_free);
+            Particle* p = chunk->particles[j]; 
+            if (p->box.l <= 0) 
+                p->vx *= -1; 
+            if (p->box.r >= container->width) 
+                p->vx *= -1; 
+            if (p->box.b <= 0) 
+                p->vy *= -1; 
+            if (p->box.t >= container->height) 
+                p->vy *= -1; 
+        }
+        printf("B\n");
+    }
+
+    for (uint i = 0; i < n_particles; i++) {
+        Particle* p = &particles[i]; 
+        p->x += p->vx*dt;  
+        p->y += p->vy*dt;  
+
+        p->box.l = p->x-p_radius;
+        p->box.r = p->x+p_radius;
+        p->box.b = p->y-p_radius;
+        p->box.t = p->y+p_radius;
+
+        p->gpu.x = p->x*container->scalar-1.0f; 
+        p->gpu.y = p->y*container->zoom-1.0f;
+    }
+    for (uint i = 0; i < chunks.x; i++) {
+        for (uint j = 0; j < chunks.y; j++) {
+            Chunk chunk = chunkmap[i][j];
+            for (uint k = 0; k < chunk.n_filled; k++) {
+                Particle* p_ptr = chunk.particles[k]; 
+                Particle p = *p_ptr; 
+                bool left_x = false; 
+                bool left_y = false; 
+                if (!left_x && chunk.neighbors->right != NULL) {
+                    if (p.box.l > chunk.box.r) { 
+                        Chunk* neighbor = chunk.neighbors->right;
+                        chunk_remove_particle(&chunk, k);
+                        if (chunk_add_particle(neighbor, p_ptr) < 0) return 1;
+                        for (int l = 0; l < p.n_chunks; l++) {
+                            if (p.chunks[l] == &chunk) {
+                                p.chunks[l] = neighbor; 
+                                break; 
+                            }
+                        }
+                        left_x = true; 
+                    }
+                }
+                if (!left_x && chunk.neighbors->left != NULL) {
+                    if (p.box.r < chunk.box.l) { 
+                        Chunk* neighbor = chunk.neighbors->right;
+                        chunk_remove_particle(&chunk, k);
+                        if (chunk_add_particle(neighbor, p_ptr) < 0) return 1;
+                        for (int l = 0; l < p.n_chunks; l++) {
+                            if (p.chunks[l] == &chunk) {
+                                p.chunks[l] = neighbor; 
+                                break; 
+                            }
+                        }
+                        left_x = true; 
+                    }
+                }
+                if (!left_y && chunk.neighbors->top != NULL) {
+                    if (p.box.b < chunk.box.t) { 
+                        Chunk* neighbor = chunk.neighbors->right;
+                        chunk_remove_particle(&chunk, k);
+                        if (chunk_add_particle(neighbor, p_ptr) < 0) return 1;
+                        for (int l = 0; l < p.n_chunks; l++) {
+                            if (p.chunks[l] == &chunk) {
+                                p.chunks[l] = neighbor; 
+                                break; 
+                            }
+                        }
+                        left_y = true; 
+                    }
+                }
+                if (!left_y && chunk.neighbors->bottom != NULL) {
+                    if (p.box.t < chunk.box.b) { 
+                        Chunk* neighbor = chunk.neighbors->right;
+                        chunk_remove_particle(&chunk, k);
+                        if (chunk_add_particle(neighbor, p_ptr) < 0) return 1;
+                        for (int l = 0; l < p.n_chunks; l++) {
+                            if (p.chunks[l] == &chunk) {
+                                p.chunks[l] = neighbor; 
+                                break; 
+                            }
+                        }
+                        left_y = true; 
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+
+int setup_particles(Particle* particles, uint n_particles, float particle_radius, Container* container, Chunk** chunkmap, Vec2ui chunks) {
+    uint particles_per_row = 1.0f/(particle_radius*container->scalar);
+    uint particles_per_col = 1.0f/(particle_radius*container->zoom);
+
+    uint n_particles_possible = particles_per_row*particles_per_col;
+    if (n_particles_possible < n_particles) {
+        fprintf(stderr, "Too many particles %d for container %d\n", n_particles, n_particles_possible); 
+        return -1; 
+    }
+
+    float v_start = 1000.0f; 
     for (uint i = 0; i < n_particles; i++) { 
-        Particle* particle = &particles[i]; 
-        
-        /* int row = i / particles_per_row; */
-        /* int col = i % particles_per_row; */
+        Particle* p = &particles[i]; 
 
-        particle->gpu.x = -1.0f + particle_radius*container->scalar + (i%particles_per_row)*2*particle_radius*container->scalar;
-        particle->gpu.x = 1.0f; 
-        particle->gpu.y = -1.0f + particle_radius*container->zoom; 
+        uint col = i%particles_per_row;
+        uint row = (uint) (i/particles_per_row);
+        p->x = particle_radius*(1.0f + 2.0f*col); 
+        p->y = particle_radius*(1.0f + 2.0f*row); 
+
+        p->box = (Box) { 
+            .l = p->x-particle_radius, 
+            .r = p->x+particle_radius,
+            .b = p->y-particle_radius,
+            .t = p->y+particle_radius 
+        };
+        p->gpu.x = -1.0f + p->x * container->scalar; 
+        p->gpu.y = -1.0f + p->y * container->zoom;
+        p->gpu.z = 0.0f; 
+
+        p->vx = rand_float(-v_start, v_start); 
+        p->vy = rand_float(-v_start, v_start); 
+    }
+
+    // This is O(N^3) 
+    int c = 0; 
+    for (uint i = 0; i < chunks.x; i++) {
+        for (uint j = 0; j < chunks.y; j++) {
+            Chunk chunk = chunkmap[i][j]; 
+            for (uint k = 0; k < n_particles; k++) {
+                Particle* p = &particles[k]; 
+                /* printf("%f %f %f %f %f %f %f %f %d %d %d\n", BOX_UNPACK(p->box), BOX_UNPACK(chunk.box), i, j, k); */ 
+                if (box_overlap(p->box, chunk.box)) {
+                    c++; 
+                    chunk_add_particle(&chunk, p);
+                    printf("%d\n", c);
+                    p->chunks[p->n_chunks] = &chunk; 
+                    p->n_chunks++; 
+                }
+            }
+        } 
+    } 
+
+    for (uint i = 0; i < chunks.x; i++) {
+        for (uint j = 0; j < chunks.y; j++) {
+            Chunk chunk = chunkmap[i][j]; 
+            /* printf("%d,%d  %d\n", i,j,chunk.n_filled); */
+        } 
+    } 
+    return 0; 
+}
 
 
-        particle->vx = rand_float(-1.0f, 1.0f); 
-        particle->vy = rand_float(-1.0f, 1.0f); 
-        particle->vx = 0.0f; 
-        particle->vy = 0.0f; 
+int setup_chunkmap(Chunk** chunkmap, Vec2ui chunks, Vec2f chunk_size, Chunk** border_chunks, Particle* particles) {
+    uint i_border_chunks = 0; 
+    
+    for (uint i = 0; i < chunks.x; i++) {
+        chunkmap[i] = malloc(chunks.y * sizeof(Chunk)); 
+        if (chunkmap[i] == NULL) {
+            fprintf(stderr, "ERROR: Failed to allocate chunkmap box.");
+            return -1; 
+        }
+        for (uint j = 0; j < chunks.y; j++) {
+            Box box = (Box) {
+                .l = i*chunk_size.x, 
+                .r = (i+1)*chunk_size.x,
+                .b = j*chunk_size.y,
+                .t = (j+1)*chunk_size.y
+            };
+            Particle** chunk_particles = malloc(2*sizeof(Particle*));
+            if (chunk_particles== NULL) {
+                fprintf(stderr, "ERROR: malloc failed.\n");
+                return -1; 
+            }
+            Chunk* chunk = malloc(sizeof(Chunk));
+            *chunk = (Chunk) { 
+                .box = box, 
+                .particles = chunk_particles, 
+                .n_filled = 0, 
+                .n_free = 2 
+            };
+            chunkmap[i][j] = *chunk;            
+
+            if (i == 0 || i == chunks.x - 1) {
+                border_chunks[i_border_chunks] = chunk; 
+                i_border_chunks++; 
+            } else if (j == 0 || j == chunks.y - 1) {
+                border_chunks[i_border_chunks] = chunk; 
+                i_border_chunks++; 
+            }
+
+            /* printf("(%d,%d) %f %f %f %f\n", i, j, box.l, box.r, box.b, box.t); */
+        }
+    }
+    for (uint i = 0; i < chunks.x; i++) {
+        for (uint j = 0; j < chunks.y; j++) {
+            ChunkNeighbors neighbors = {
+                .left = NULL,
+                .right = NULL,
+                .bottom = NULL,
+                .top = NULL,
+            }; 
+            if (i > 0) 
+                neighbors.left = &chunkmap[i-1][j];
+            if (j > 0) 
+                neighbors.bottom = &chunkmap[i][j-1];
+            if (i + 1 < chunks.x) 
+                neighbors.right = &chunkmap[i+1][j];
+            if (j + 1 < chunks.y) 
+                neighbors.top = &chunkmap[i][j+1];
+
+            chunkmap[i][j].neighbors = &neighbors; 
+        }
     }
     return 0; 
 }
 
 
-void destory_everything(
+void destroy_sdl(
     SDL_GPUDevice* device, 
     SDL_GPUGraphicsPipeline* pipeline, 
     SDL_GPUBuffer* vertex_buffer, 
@@ -201,14 +507,35 @@ void destory_everything(
 }
 
 
+void free_particles(Particle* particles, uint n_particles) {
+    for (int i = 0; i < n_particles; i++) {
+        free(particles[i].chunks); 
+    }
+    free(particles);
+}
+
+
+void free_chunkmap(Chunk** chunkmap, Vec2ui chunks, Chunk** border_chunks) {
+    printf("C\n");
+    free(border_chunks);
+    for (uint i = 0; i < chunks.x; i++) {
+        for (uint j = 0; j < chunks.y; j++) {
+            Chunk chunk = chunkmap[i][j]; 
+            free(chunk.particles); 
+        }
+        free(chunkmap[i]); 
+    } 
+    free(chunkmap); 
+    printf("C\n");
+}
+
+
 int main(int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "ERROR: SDL_Init failed: %s\n", SDL_GetError());
         return 1; 
     } 
-
-    uint WINDOW_WIDTH        = 1400; 
-    uint WINDOW_HEIGHT       = 1000; 
+    
     const char* WINDOW_TITLE = "Pressure Simulation";
 
     SDL_Window* window; 
@@ -224,7 +551,7 @@ int main(int argc, char* argv[]) {
         return 1; 
     }
 
-    printf("OK: Created device with driver '%s'\n", SDL_GetGPUDeviceDriver(device));
+    fprintf(stdout, "OK: Created device with driver '%s'\n", SDL_GetGPUDeviceDriver(device));
     if (!SDL_ClaimWindowForGPUDevice(device, window)) {
         fprintf(stderr, "ERROR: SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
         return 1; 
@@ -396,7 +723,7 @@ int main(int argc, char* argv[]) {
     }; 
     container.inverse_aspect_ratio = (float) container.height/container.width; 
     container.scalar = container.inverse_aspect_ratio * container.zoom; 
-    float radius = 30.0f; 
+    float radius = R; 
     for (int i = 0; i < n_vertices; i++) {
         transfer_data[i].x *= container.inverse_aspect_ratio;   
         transfer_data[i].x *= radius*container.zoom;  
@@ -445,7 +772,7 @@ int main(int argc, char* argv[]) {
     SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
     SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
 
-    uint n_instances = 1000; // Depends on the GPU i guess, I have 8GB VRAM so 1 million should be fine 
+    uint n_instances = N; // Depends on the GPU i guess, I have 8GB VRAM so 1 million should be fine 
     SDL_GPUBuffer* live_data_buffer = SDL_CreateGPUBuffer(
         device,
         &(SDL_GPUBufferCreateInfo) {
@@ -480,30 +807,50 @@ int main(int argc, char* argv[]) {
     };
 
 
-    // The simulation 
-    bool quit = false; 
-    int index_offset  = 0; 
-    int vertex_offset = 0; 
-
-    float dt = 0.001f; 
-
-    uint sim_state = 0; 
-
-    Particle* particles; 
-    particles = (Particle*) calloc(n_instances, sizeof(Particle));
+    // Setup simulation 
+    Particle* particles = (Particle*) calloc(n_instances, sizeof(Particle));
 
     if (particles == NULL) {
-        fprintf(stderr, "ERROR: calloc particles failed!\n");
-        destory_everything(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        fprintf(stderr, "ERROR: Allocating memory for %d particles failed!\n", n_instances);
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
         return 1;
     }
 
-    int sim_setup = setup_particles(particles, n_instances, radius, &container);
-    if (sim_setup < 0) {
-        fprintf(stderr, "ERROR: sim setup failed.\n");
-        destory_everything(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+    Vec2ui chunks = { .x = 10, .y = 8 }; 
+    Vec2f chunk_size = { .x = (float) container.width / chunks.x, .y = (float) container.height / chunks.y }; 
+
+    Chunk** chunkmap = malloc(chunks.x * sizeof(Chunk *)); 
+    uint n_border_chunks = 2*(chunks.x+chunks.y)-4; 
+    Chunk** border_chunks = malloc(n_border_chunks * sizeof(Chunk*));
+
+    if (chunkmap == NULL || border_chunks == NULL) {
+        fprintf(stderr, "ERROR: Failed to allocate chunkmap.");
+        free_particles(particles, n_instances);
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
         return 1; 
     }
+
+    if (setup_chunkmap(chunkmap, chunks, chunk_size, border_chunks, particles) < 0) {
+        free_particles(particles, n_instances);
+        free_chunkmap(chunkmap, chunks, border_chunks); 
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        return 1; 
+    }
+
+    printf("chunkmap initialized!\n");
+    int sim_setup = setup_particles(particles, n_instances, radius, &container, chunkmap, chunks);
+    if (sim_setup < 0) {
+        fprintf(stderr, "ERROR: sim setup failed.\n");
+        free_particles(particles, n_instances);
+        free_chunkmap(chunkmap, chunks, border_chunks); 
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        return 1; 
+    }
+
+    uint sim_state = 0; 
+    float dt = 0.001f; 
+
+    bool quit = false; 
 
     while (!quit) {
         SDL_Event event;
@@ -529,7 +876,7 @@ int main(int argc, char* argv[]) {
         }
         
         if (sim_state == 1) {
-            physics_tick(dt, particles, n_instances); 
+            physics_tick(dt, particles, n_instances, radius, &container, chunkmap, chunks, border_chunks, n_border_chunks); 
         }
 
         GPUParticle* live_data = SDL_MapGPUTransferBuffer(
@@ -607,7 +954,9 @@ int main(int argc, char* argv[]) {
         SDL_SubmitGPUCommandBuffer(cmdbuf);
     }
     
-    destory_everything(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+    free_particles(particles, n_instances);
+    free_chunkmap(chunkmap, chunks, border_chunks);
+    destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
     return 0; 
 }
 
