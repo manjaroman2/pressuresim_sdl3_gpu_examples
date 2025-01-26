@@ -1,13 +1,10 @@
 #include <SDL3/SDL.h> 
-#include <SDL3/SDL_gpu.h>
-#include <SDL3/SDL_keycode.h>
-#include <SDL3/SDL_stdinc.h>
-#include <SDL3/SDL_surface.h>
 #include <stdlib.h> 
 #include <stdio.h> 
+#include <strings.h>
 
-#define COLOR_RGBA(color) (color).r, (color).g, (color).b, (color).a
 #define COLOR_TO_UINT8(color) {(Uint8)((color).r * 255), (Uint8)((color).g * 255), (Uint8)((color).b * 255), (Uint8)((color).a * 255)}
+#define RGBA_TO_FLOAT(r, g, b, a) ((float)(r) / 255.0f), ((float)(g) / 255.0f), ((float)(b) / 255.0f), ((float)(a) / 255.0f)
 
 typedef struct PositionTextureVertex {
     float x, y, z;
@@ -18,16 +15,24 @@ typedef struct PositionTextureVertex {
 
 
 typedef struct GPUParticle {
-    float x, y, z; 
-    float padding; 
+    float x, y, z; // gpu coords 
+    float padding; // vulkan needs 16 byte alignment. maybe theres a fix to this, seems wasteful 
 } GPUParticle; 
+
 
 typedef struct Particle {
     GPUParticle gpu;
-    float x, y, z; 
+    float x, y, z; // like world coords  
     float vx, vy; 
     float m; 
 } Particle; 
+
+
+typedef struct Container {
+    uint width, height; 
+    float zoom, inverse_aspect_ratio, scalar; 
+} Container; 
+
 
 SDL_GPUShader* load_shader(
     SDL_GPUDevice* device, 
@@ -107,7 +112,7 @@ void handle_event(SDL_Event event, bool* quit, uint* sim_state) {
 }
 
 
-void print_info() {
+void print_device_driver_info() {
     int render_drivers = SDL_GetNumRenderDrivers(); 
     printf("Number of render drivers: %i\n", render_drivers); 
 
@@ -125,20 +130,74 @@ void print_info() {
     printf("Current video driver: %s\n", SDL_GetCurrentVideoDriver());
 }
 
+
 float rand_float(float min, float max) {
     return min + (max - min) * (rand() / (float)RAND_MAX);
 }
 
+
 void physics_tick(float dt, Particle* particles, uint n_particles) {
     for (int i = 0; i < n_particles; i++) {
         Particle* particle = &particles[i]; 
-        particle->x += particle->vx*0.001f;  
-        particle->y += particle->vy*0.001f;  
-        /* particle->gpu.x = 1.0f*i/(n_particles-1); */ 
+        particle->x += particle->vx*dt;  
+        particle->y += particle->vy*dt;  
         particle->gpu.x = particle->x;  
         particle->gpu.y = particle->y;  
         particle->gpu.z = 0.0f;  
     }
+}
+
+
+int setup_particles(Particle* particles, uint n_particles, float particle_radius, Container* container) {
+    /* uint n_particles_possible = container->width*container->height/(4*particle_radius*particle_radius); */ 
+    /* if (n_particles_possible < n_particles) { */
+    /*     fprintf(stderr, "Too many particles %d for container %d\n", n_particles, n_particles_possible); */ 
+    /*     return -1; */ 
+    /* } */
+    /* int particles_per_row = (container->width - particle_radius) / (8 * particle_radius); */
+
+    int particles_per_row = (1.0f/(particle_radius*container->scalar)-0.5f);
+    printf("%f %f\n", container->scalar, container->zoom);
+
+    for (uint i = 0; i < n_particles; i++) { 
+        Particle* particle = &particles[i]; 
+        
+        /* int row = i / particles_per_row; */
+        /* int col = i % particles_per_row; */
+
+        particle->gpu.x = -1.0f + particle_radius*container->scalar + (i%particles_per_row)*2*particle_radius*container->scalar;
+        particle->gpu.x = 1.0f; 
+        particle->gpu.y = -1.0f + particle_radius*container->zoom; 
+
+
+        particle->vx = rand_float(-1.0f, 1.0f); 
+        particle->vy = rand_float(-1.0f, 1.0f); 
+        particle->vx = 0.0f; 
+        particle->vy = 0.0f; 
+    }
+    return 0; 
+}
+
+
+void destory_everything(
+    SDL_GPUDevice* device, 
+    SDL_GPUGraphicsPipeline* pipeline, 
+    SDL_GPUBuffer* vertex_buffer, 
+    SDL_GPUBuffer* index_buffer, 
+    SDL_GPUTransferBuffer* live_data_transfer_buffer, 
+    SDL_GPUBuffer* live_data_buffer, 
+    SDL_Window* window) {
+
+    SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+    SDL_ReleaseGPUBuffer(device, vertex_buffer); 
+    SDL_ReleaseGPUBuffer(device, index_buffer); 
+    SDL_ReleaseGPUTransferBuffer(device, live_data_transfer_buffer); 
+    SDL_ReleaseGPUBuffer(device, live_data_buffer); 
+
+    SDL_ReleaseWindowFromGPUDevice(device, window);
+    SDL_DestroyWindow(window);
+    SDL_DestroyGPUDevice(device);
+    SDL_Quit();
 }
 
 
@@ -148,8 +207,8 @@ int main(int argc, char* argv[]) {
         return 1; 
     } 
 
-    Uint16 WINDOW_WIDTH      = 1400; 
-    Uint16 WINDOW_HEIGHT     = 1000; 
+    uint WINDOW_WIDTH        = 1400; 
+    uint WINDOW_HEIGHT       = 1000; 
     const char* WINDOW_TITLE = "Pressure Simulation";
 
     SDL_Window* window; 
@@ -182,7 +241,7 @@ int main(int argc, char* argv[]) {
     }
 
     SDL_GPUShader* shader_frag = load_shader(device, "shaders/compiled/Circle.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
-    if (shader_vert == NULL) {
+    if (shader_frag == NULL) {
         fprintf(stderr, "ERROR: load_shader failed.\n");
         return 1;   
     }
@@ -196,6 +255,7 @@ int main(int argc, char* argv[]) {
     SDL_FColor COLOR_CYAN        = (SDL_FColor) { 0.0f, 1.0f, 1.0f, 1.0f }; 
     SDL_FColor COLOR_YELLOW      = (SDL_FColor) { 1.0f, 1.0f, 0.0f, 1.0f }; 
     SDL_FColor COLOR_PINK        = (SDL_FColor) { 1.0f, 0.0f, 1.0f, 1.0f }; 
+    SDL_FColor COLOR_GRAY        = (SDL_FColor) { RGBA_TO_FLOAT(36, 36, 36, 255) }; 
 
     SDL_GPUGraphicsPipelineCreateInfo pipeline_info = {
         .vertex_shader = shader_vert,
@@ -276,7 +336,6 @@ int main(int argc, char* argv[]) {
     SDL_ReleaseGPUShader(device, shader_vert); 
     SDL_ReleaseGPUShader(device, shader_frag); 
 
-
     uint n_vertices = 4; 
     uint n_indices  = 6; 
     SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(
@@ -330,13 +389,18 @@ int main(int argc, char* argv[]) {
         COLOR_TO_UINT8(COLOR_TRANSPARENT)
     };
 
-    float inverse_aspect_ratio = 1.0f*WINDOW_HEIGHT/WINDOW_WIDTH;
-    float radius = 2.0f; 
-    float radius_scalar = radius/100.0f; 
+    Container container = { 
+        .width = WINDOW_WIDTH, 
+        .height = WINDOW_HEIGHT, 
+        .zoom = 1/500.0f 
+    }; 
+    container.inverse_aspect_ratio = (float) container.height/container.width; 
+    container.scalar = container.inverse_aspect_ratio * container.zoom; 
+    float radius = 30.0f; 
     for (int i = 0; i < n_vertices; i++) {
-        transfer_data[i].x *= inverse_aspect_ratio;   
-        transfer_data[i].x *= radius_scalar;  
-        transfer_data[i].y *= radius_scalar;  
+        transfer_data[i].x *= container.inverse_aspect_ratio;   
+        transfer_data[i].x *= radius*container.zoom;  
+        transfer_data[i].y *= radius*container.zoom;  
     }
 
     Uint16* index_data = (Uint16*) &transfer_data[n_vertices];
@@ -381,8 +445,7 @@ int main(int argc, char* argv[]) {
     SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
     SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
 
-
-    uint n_instances = 1000000;
+    uint n_instances = 1000; // Depends on the GPU i guess, I have 8GB VRAM so 1 million should be fine 
     SDL_GPUBuffer* live_data_buffer = SDL_CreateGPUBuffer(
         device,
         &(SDL_GPUBufferCreateInfo) {
@@ -391,7 +454,7 @@ int main(int argc, char* argv[]) {
         }
     );
 
-    SDL_GPUTransferBuffer* live_data_tranfer_buffer = SDL_CreateGPUTransferBuffer(
+    SDL_GPUTransferBuffer* live_data_transfer_buffer = SDL_CreateGPUTransferBuffer(
         device,
         &(SDL_GPUTransferBufferCreateInfo) {
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
@@ -406,7 +469,6 @@ int main(int argc, char* argv[]) {
 
     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-    
     uint viewport_width      = WINDOW_WIDTH; 
     uint viewport_height     = WINDOW_HEIGHT; 
     float viewport_min_depth = 0.1f; 
@@ -417,11 +479,13 @@ int main(int argc, char* argv[]) {
         viewport_min_depth, viewport_max_depth 
     };
 
+
+    // The simulation 
     bool quit = false; 
     int index_offset  = 0; 
     int vertex_offset = 0; 
 
-    float dt = 0.0f; 
+    float dt = 0.001f; 
 
     uint sim_state = 0; 
 
@@ -429,13 +493,16 @@ int main(int argc, char* argv[]) {
     particles = (Particle*) calloc(n_instances, sizeof(Particle));
 
     if (particles == NULL) {
-        printf("Memory allocation failed!\n");
+        fprintf(stderr, "ERROR: calloc particles failed!\n");
+        destory_everything(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
         return 1;
     }
-    for (uint i = 0; i < n_instances; i++) {
-        Particle* particle = &particles[i]; 
-        particle->vx = rand_float(-1.0f, 1.0f); 
-        particle->vy = rand_float(-1.0f, 1.0f); 
+
+    int sim_setup = setup_particles(particles, n_instances, radius, &container);
+    if (sim_setup < 0) {
+        fprintf(stderr, "ERROR: sim setup failed.\n");
+        destory_everything(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        return 1; 
     }
 
     while (!quit) {
@@ -467,7 +534,7 @@ int main(int argc, char* argv[]) {
 
         GPUParticle* live_data = SDL_MapGPUTransferBuffer(
             device,
-            live_data_tranfer_buffer,
+            live_data_transfer_buffer,
             true
         );
 
@@ -481,13 +548,13 @@ int main(int argc, char* argv[]) {
         /* for (Uint32 i = 0; i < n_instances; i+=1) { */
         /*  printf("%d x=%f y=%f z=%f\n", i, live_data[i].x, live_data[i].y, live_data[i].z); */
         /* } */
-        SDL_UnmapGPUTransferBuffer(device, live_data_tranfer_buffer); 
+        SDL_UnmapGPUTransferBuffer(device, live_data_transfer_buffer); 
 
         SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmdbuf);
         SDL_UploadToGPUBuffer(
             copy_pass,
             &(SDL_GPUTransferBufferLocation) {
-                .transfer_buffer = live_data_tranfer_buffer,
+                .transfer_buffer = live_data_transfer_buffer,
                 .offset = 0
             },
             &(SDL_GPUBufferRegion) {
@@ -501,7 +568,7 @@ int main(int argc, char* argv[]) {
 
         SDL_GPUColorTargetInfo color_target_info = { 0 };
         color_target_info.texture     = swapchain_texture;
-        color_target_info.clear_color = COLOR_BLACK;  
+        color_target_info.clear_color = COLOR_GRAY;  
         color_target_info.load_op     = SDL_GPU_LOADOP_CLEAR;
         color_target_info.store_op    = SDL_GPU_STOREOP_STORE;
         color_target_info.cycle       = false;
@@ -539,18 +606,8 @@ int main(int argc, char* argv[]) {
 
         SDL_SubmitGPUCommandBuffer(cmdbuf);
     }
-
-    SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
-    SDL_ReleaseGPUBuffer(device, vertex_buffer); 
-    SDL_ReleaseGPUBuffer(device, index_buffer); 
-    SDL_ReleaseGPUTransferBuffer(device, live_data_tranfer_buffer); 
-    SDL_ReleaseGPUBuffer(device, live_data_buffer); 
-
-    SDL_ReleaseWindowFromGPUDevice(device, window);
-    SDL_DestroyWindow(window);
-    SDL_DestroyGPUDevice(device);
-    SDL_Quit();
-
+    
+    destory_everything(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
     return 0; 
 }
 
