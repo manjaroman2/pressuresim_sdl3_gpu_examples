@@ -1,4 +1,5 @@
-#include <SDL3/SDL.h> 
+#include "pressure-sim-utils.h"
+
 #include <stdlib.h> 
 #include <stdio.h> 
 
@@ -10,14 +11,6 @@
 #define R 10.0f 
 #define WINDOW_WIDTH  1200
 #define WINDOW_HEIGHT 1000 
-
-
-typedef struct PositionTextureVertex {
-    float x, y, z;
-    float u, v;
-    Uint8 color1[4];
-    Uint8 color2[4];
-} PositionTextureVertex;
 
 
 typedef struct GPUParticle {
@@ -89,7 +82,6 @@ typedef struct Container {
 
 
 int chunk_add_particle(Chunk* chunk, Particle* p) {
-    printf("chunk_add\n");
     if (chunk->n_free == 0) {
         chunk->particles = realloc(chunk->particles, 2 * chunk->n_filled * sizeof(Particle*));
         if (chunk->particles == NULL) {
@@ -99,72 +91,20 @@ int chunk_add_particle(Chunk* chunk, Particle* p) {
         chunk->n_free = chunk->n_filled;
     } 
     chunk->particles[chunk->n_filled] = p; 
-    printf("chunk_add %d %d\n", chunk->n_filled, chunk->n_free);
     chunk->n_filled++; 
     chunk->n_free--;
-    printf("chunk_add %d %d\n", chunk->n_filled, chunk->n_free);
     return 0; 
 }
 
 
 int chunk_remove_particle(Chunk* chunk, uint i) {
-    printf("chunk_remove\n");
     chunk->n_filled--;
     chunk->particles[i] = chunk->particles[chunk->n_filled]; 
     chunk->particles[chunk->n_filled] = NULL;
     chunk->n_free++;
-    printf("chunk_remove\n");
     return 0; 
 }
 
-SDL_GPUShader* load_shader(
-    SDL_GPUDevice* device, 
-    const char* filename, 
-    SDL_GPUShaderStage stage, 
-    Uint32 sampler_count, 
-    Uint32 uniform_buffer_count, 
-    Uint32 storage_buffer_count, 
-    Uint32 storage_texture_count) {
-
-    if(!SDL_GetPathInfo(filename, NULL)) {
-        fprintf(stdout, "File '%s' does not exist.\n", filename);
-        return NULL;    
-    }
-        
-    if (!(SDL_GetGPUShaderFormats(device) & SDL_GPU_SHADERFORMAT_SPIRV)) {
-        fprintf(stdout, "SDL_GPU_SHADERFORMAT_SPIRV not available.\n"); 
-        return NULL; 
-    }
-
-    size_t code_size; 
-    void* code = SDL_LoadFile(filename, &code_size); 
-    if (code == NULL) {
-        fprintf(stderr, "ERROR: SDL_LoadFile failed: %s\n", SDL_GetError());
-        return NULL;  
-    }
-
-    SDL_GPUShaderCreateInfo shader_info = {
-        .code = code,
-        .code_size = code_size,
-        .entrypoint = "main",
-        .format = SDL_GPU_SHADERFORMAT_SPIRV,
-        .stage = stage,
-        .num_samplers = sampler_count,
-        .num_uniform_buffers = uniform_buffer_count,
-        .num_storage_buffers = storage_buffer_count,
-        .num_storage_textures = storage_texture_count
-    };
-
-    SDL_GPUShader* shader = SDL_CreateGPUShader(device, &shader_info);
-
-    if (shader == NULL) {
-        fprintf(stderr, "ERROR: SDL_CreateGPUShader failed: %s\n", SDL_GetError());
-        SDL_free(code); 
-        return NULL;  
-    }
-    SDL_free(code); 
-    return shader; 
-}
 
 
 void handle_event(SDL_Event event, bool* quit, uint* sim_state) {
@@ -367,6 +307,7 @@ int setup_particles(Particle* particles, uint n_particles, float particle_radius
         fprintf(stderr, "Too many particles %d for container %d\n", n_particles, n_particles_possible); 
         return -1; 
     }
+
 
     float v_start = 1000.0f; 
     for (uint i = 0; i < n_particles; i++) { 
