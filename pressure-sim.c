@@ -5,17 +5,19 @@
 #include <stdio.h> 
 #include <string.h>
 
-#define particle_collisions(_p, _chunk_ref)                                              \
+#define particle_collisions(_p, _chunk_ref) ({                                           \
     for (uint32_t j = 0; j < (_chunk_ref)->p_index; j++) {                               \
         collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
     }                                                                                    \
     for (uint32_t j = (_chunk_ref)->p_index+1; j < (_chunk_ref)->chunk->n_filled; j++) { \
         collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
-    } 
+    }                                                                                    \
+})
 
-#define particle_update_chunk_ref(_p, _i, _chunk, _p_index) \
-    (_p)->chunk_ref[(_i)].chunk = (_chunk);                 \
-    (_p)->chunk_ref[(_i)].p_index = (_p_index);
+#define particle_update_chunk_ref(_p, _i, _chunk, _p_index) ({ \
+    (_p)->chunk_ref[(_i)].chunk = (_chunk);                    \
+    (_p)->chunk_ref[(_i)].p_index = (_p_index);                \
+}) 
 
 #define chunk_append(_chunk, _p) ({                                        \
     if ((_chunk)->n_free == 0) {                                           \
