@@ -3,7 +3,8 @@
 
 #include <SDL3/SDL.h>
 
-#define RGBA_TO_FLOAT(r, g, b, a) ((float)(r) / 255.0f), ((float)(g) / 255.0f), ((float)(b) / 255.0f), ((float)(a) / 255.0f)
+#define COLOR_TO_UINT8(_color) {(uint8_t)((_color).r * 255), (uint8_t)((_color).g * 255), (uint8_t)((_color).b * 255), (uint8_t)((_color).a * 255)}
+#define RGBA_TO_FLOAT(_r, _g, _b, _a) ((float)(_r) / 255.0f), ((float)(_g) / 255.0f), ((float)(_b) / 255.0f), ((float)(_a) / 255.0f)
 
 extern const SDL_FColor COLOR_TRANSPARENT;
 extern const SDL_FColor COLOR_WHITE; 
