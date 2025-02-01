@@ -518,7 +518,7 @@ int setup_simulation_memory(
         fprintf(stderr, "ERROR: malloc of memory block (size=%zu) failed.\n", total_size);
         return -1;
     }
-    printf("Allocated %zu bytes on heap.\n", total_size);
+    printf("Allocated %zuKB on heap.\n", total_size/1000);
 
     // heap layout: 
     // |  abstraction  |  type            |  n                                |  description            |
