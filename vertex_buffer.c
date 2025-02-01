@@ -66,7 +66,7 @@ SDL_GPUShader* load_shader(
 }
 
 
-void print_info() {
+void print_info(void) {
     int render_drivers = SDL_GetNumRenderDrivers(); 
     printf("Number of render drivers: %i\n", render_drivers); 
 
@@ -84,25 +84,28 @@ void print_info() {
     printf("Current video driver: %s\n", SDL_GetCurrentVideoDriver());
 }
 
+
 void handle_event(SDL_Event event, bool* quit) {
     switch (event.type) {
-        case SDL_EVENT_QUIT:  
+        case SDL_EVENT_QUIT: {  
             *quit = true; 
-            break; 
-        case SDL_EVENT_KEY_DOWN:
+        } break; 
+        case SDL_EVENT_KEY_DOWN: {  
             switch (event.key.key) {
-                case SDLK_Q:    
+                case SDLK_Q: {    
                     *quit = true; 
-                    break; 
-                case SDLK_W:    
-                    break; 
-                case SDLK_S:    
-                    break; 
-                case SDLK_D:    
-                    break; 
-            }
+                } break; 
+                case SDLK_W: {  
+                    
+                } break; 
+                case SDLK_S: {    
+                
+                } break; 
+                case SDLK_D: {
 
-            break; 
+                } break; 
+            }
+        } break; 
     } 
 }
 

@@ -18,6 +18,7 @@ e.g `./compile-and-run.sh basic-triangle`
 
 ### Todos
 
+* fix textured quad example 
 * container size should not stretch the paricles
 * chunk grid shader
 

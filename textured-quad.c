@@ -124,7 +124,7 @@ void handle_event(SDL_Event event, bool* quit, int* index_offset, int* vertex_of
 }
 
 
-void print_info() {
+void print_info(void) {
     int render_drivers = SDL_GetNumRenderDrivers(); 
     printf("Number of render drivers: %i\n", render_drivers); 
 
