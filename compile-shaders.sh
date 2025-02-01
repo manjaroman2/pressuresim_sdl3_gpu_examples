@@ -12,6 +12,7 @@ set -- \
     "PositionColorInstanced.vert" \
     "PositionColorInstancedVertex.vert" \
     "Circle.vert" \
+    "Line.vert" \
     "TexturedQuad.frag" \
     "SolidColor.frag" \
     "Circle.frag"

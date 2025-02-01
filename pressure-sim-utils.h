@@ -26,6 +26,11 @@ typedef struct PositionTextureVertex {
 } PositionTextureVertex;
 
 
+typedef struct Vec2Vertex {
+    float x, y;
+} Vec2Vertex;
+
+
 SDL_GPUShader* load_shader(
     SDL_GPUDevice* device, 
     const char* filename, 

@@ -1,5 +1,6 @@
 #include "pressure-sim-utils.h"
 
+#include <SDL3/SDL_gpu.h>
 #include <stdint.h>
 #include <stdlib.h> 
 #include <stdio.h> 
@@ -133,12 +134,14 @@ typedef struct Container {
 void destroy_sdl(
     SDL_GPUDevice* device, 
     SDL_GPUGraphicsPipeline* pipeline, 
+    SDL_GPUGraphicsPipeline* debug_pipeline, 
     SDL_GPUBuffer* vertex_buffer, 
     SDL_GPUBuffer* index_buffer, 
     SDL_GPUTransferBuffer* live_data_transfer_buffer, 
     SDL_GPUBuffer* live_data_buffer, 
     SDL_Window* window) {
 
+    SDL_ReleaseGPUGraphicsPipeline(device, debug_pipeline);
     SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
     SDL_ReleaseGPUBuffer(device, vertex_buffer); 
     SDL_ReleaseGPUBuffer(device, index_buffer); 
@@ -853,6 +856,78 @@ int main(int argc, char* argv[]) {
     SDL_ReleaseGPUShader(device, shader_vert); 
     SDL_ReleaseGPUShader(device, shader_frag); 
 
+    SDL_GPUShader* shader_vert_debug = load_shader(device, "shaders/compiled/Line.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1, 0); 
+    if (shader_vert == NULL) {
+        fprintf(stderr, "ERROR: load_shader failed.\n");
+        return 1;   
+    }
+
+    SDL_GPUShader* shader_frag_debug = load_shader(device, "shaders/compiled/SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
+    if (shader_frag == NULL) {
+        fprintf(stderr, "ERROR: load_shader failed.\n");
+        return 1;   
+    }
+
+    SDL_GPUGraphicsPipelineCreateInfo debug_pipeline_info = {
+        .vertex_shader = shader_vert_debug,
+        .fragment_shader = shader_frag_debug,
+        .vertex_input_state = (SDL_GPUVertexInputState) {
+            .vertex_buffer_descriptions = (SDL_GPUVertexBufferDescription[]) {
+                {
+                    .slot = 0,
+                    .pitch = sizeof(Vec2Vertex),
+                    .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+                    .instance_step_rate = 0
+                },
+            }, 
+            .num_vertex_buffers = 1,
+            .vertex_attributes = (SDL_GPUVertexAttribute[]) {
+                {
+                    .location = 0,
+                    .buffer_slot = 0,
+                    .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,  
+                    .offset = 0                
+                }
+            },  
+            .num_vertex_attributes = 1
+        },
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .rasterizer_state = (SDL_GPURasterizerState){
+            .cull_mode = SDL_GPU_CULLMODE_NONE,
+            .fill_mode = SDL_GPU_FILLMODE_LINE,
+            .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE
+        },
+        .target_info = {
+            .color_target_descriptions = (SDL_GPUColorTargetDescription[]){
+                {
+                    .format = SDL_GetGPUSwapchainTextureFormat(device, window),
+                    .blend_state = (SDL_GPUColorTargetBlendState) {
+                        .src_color_blendfactor   = SDL_GPU_BLENDFACTOR_SRC_ALPHA, 
+                        .dst_color_blendfactor   = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, 
+                        .color_blend_op          = SDL_GPU_BLENDOP_ADD, 
+                        .src_alpha_blendfactor   = SDL_GPU_BLENDFACTOR_SRC_ALPHA, 
+                        .dst_alpha_blendfactor   = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA, 
+                        .alpha_blend_op          = SDL_GPU_BLENDOP_ADD, 
+                        /* .color_write_mask        = SDL_GPU_COLORCOMPONENT_A, */ 
+                        .enable_blend            = true, 
+                        /* .enable_color_write_mask = true, */
+                        /* .padding1                = 0, */ 
+                        /* .padding2                = 0 */ 
+                    }
+                }
+            },
+            .num_color_targets = 1
+        },
+    };  
+    SDL_GPUGraphicsPipeline* debug_pipeline = SDL_CreateGPUGraphicsPipeline(device, &debug_pipeline_info);
+    if (debug_pipeline == NULL) {
+        fprintf(stderr, "ERROR: SDL_CreateGPUGraphicsPipeline failed: %s\n", SDL_GetError());
+        return 1;
+    }
+
+    SDL_ReleaseGPUShader(device, shader_vert_debug); 
+    SDL_ReleaseGPUShader(device, shader_frag_debug); 
+
     uint32_t n_vertices = 4; 
     uint32_t n_indices  = 6; 
     SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(
@@ -911,6 +986,7 @@ int main(int argc, char* argv[]) {
         .height = WINDOW_HEIGHT, 
         .zoom = 1/500.0f 
     }; 
+
     container.inverse_aspect_ratio = (float) container.height/container.width; 
     container.scalar = container.inverse_aspect_ratio * container.zoom; 
     float particle_radius = R; 
@@ -1014,7 +1090,7 @@ int main(int argc, char* argv[]) {
 
     printf("initializing memory...\n");
     if (setup_simulation_memory(&mem_block, &chunkmap, chunkmap_info, &border_chunks, n_border_chunks, n_max_particles_per_chunk, &particles, n_particles) < 0) {
-        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        destroy_sdl(device, pipeline, debug_pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
         return 1; 
     }
     printf("memory initialized successfully!\n");
@@ -1022,7 +1098,7 @@ int main(int argc, char* argv[]) {
     if (setup_particles(chunkmap, chunkmap_info, particles, n_particles, particle_radius, &container) < 0) {
         fprintf(stderr, "ERROR: sim setup failed.\n");
         free(mem_block);
-        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        destroy_sdl(device, pipeline, debug_pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
         return 1; 
     }
     printf("%d particles initialized!\n", n_particles);
@@ -1126,15 +1202,42 @@ int main(int argc, char* argv[]) {
             }, 
             SDL_GPU_INDEXELEMENTSIZE_16BIT
         );
-
         SDL_DrawGPUIndexedPrimitives(render_pass, n_indices, n_particles, 0, 0, 0);
+
+        /* SDL_BindGPUGraphicsPipeline(render_pass, debug_pipeline); */
+        /* SDL_SetGPUViewport(render_pass, &small_viewport); */
+        /* SDL_BindGPUVertexBuffers( */
+        /*     render_pass, */ 
+        /*     0, */ 
+        /*     &(SDL_GPUBufferBinding) { */
+        /*         .buffer = vertex_buffer_debug, */ 
+        /*         .offset = 0 */
+        /*     }, */ 
+        /*     1 */
+        /* ); */ 
+        /* SDL_BindGPUVertexStorageBuffers( */
+        /*     render_pass, */
+        /*     0, */
+        /*     &live_data_buffer_debug, */
+        /*     1 */
+        /* ); */
+        /* SDL_BindGPUIndexBuffer( */
+        /*     render_pass, */ 
+        /*     &(SDL_GPUBufferBinding) { */ 
+        /*         .buffer = index_buffer_debug, */ 
+        /*         .offset = 0 */ 
+        /*     }, */ 
+        /*     SDL_GPU_INDEXELEMENTSIZE_16BIT */
+        /* ); */
+        /* SDL_DrawGPUIndexedPrimitives(render_pass, n_indices_debug, n_instances_debug, 0, 0, 0); */
+
         SDL_EndGPURenderPass(render_pass);
 
         SDL_SubmitGPUCommandBuffer(cmdbuf);
     }
     
     free(mem_block);
-    destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+    destroy_sdl(device, pipeline, debug_pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
     return 0; 
 }
 
