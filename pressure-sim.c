@@ -312,7 +312,6 @@ int physics_tick(
         p->gpu.x += dx*container->scalar;
         p->gpu.y += dy*container->zoom;
 
-        /* printf("particle #%d chunk_state:%d\n", i, p->chunk_state); */
         switch (p->chunk_state) {
             case ONE: {
                 ChunkRef chunk_ref = p->chunk_ref[0]; 
@@ -808,14 +807,9 @@ int setup_particles(
                             particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
                             particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
                         } break; 
-                        case LRTB: {
-                            // nothing to do here 
+                        case LRTB: { // nothing to do here 
                         } break; 
                     }
-                    /* printf("set particle %d -> chunk<%d,%d>\n", k, i, j); */
-                    /* printf("(%d,%d) free: %d\n", i, j, chunk->n_free); */
-                    /* p->chunks[p->n_chunks] = chunk; */ 
-                    /* p->n_chunks++; */ 
                 }
             }
         } 
@@ -1105,18 +1099,10 @@ int main(int argc, char* argv[]) {
     uint32_t n_indices_debug  = 6; 
     vulkan_buffers_create(device, &vertex_buffer_debug, sizeof(Vec2Vertex), n_vertices_debug, &index_buffer_debug, n_indices_debug, &transfer_buffer_debug, (void**)&transfer_data_debug);
     
-    transfer_data_debug[0] = (Vec2Vertex) { 
-         -1.0f,  1.0f 
-    };
-    transfer_data_debug[1] = (Vec2Vertex) {  
-        1.0f,  1.0f
-    };
-    transfer_data_debug[2] = (Vec2Vertex) {  
-         1.0f, -1.0f
-    };
-    transfer_data_debug[3] = (Vec2Vertex) { 
-        -1.0f, -1.0f
-    };
+    transfer_data_debug[0] = (Vec2Vertex) { -1.0f,  1.0f };
+    transfer_data_debug[1] = (Vec2Vertex) {  1.0f,  1.0f };
+    transfer_data_debug[2] = (Vec2Vertex) {  1.0f, -1.0f };
+    transfer_data_debug[3] = (Vec2Vertex) { -1.0f, -1.0f };
 
     /* Container container = { */ 
     /*     .width = WINDOW_WIDTH, */ 
@@ -1292,32 +1278,32 @@ int main(int argc, char* argv[]) {
         );
         SDL_DrawGPUIndexedPrimitives(render_pass, n_indices, n_particles, 0, 0, 0);
 
-        /* SDL_BindGPUGraphicsPipeline(render_pass, debug_pipeline); */
-        /* SDL_SetGPUViewport(render_pass, &small_viewport); */
-        /* SDL_BindGPUVertexBuffers( */
-        /*     render_pass, */ 
-        /*     0, */ 
-        /*     &(SDL_GPUBufferBinding) { */
-        /*         .buffer = vertex_buffer_debug, */ 
-        /*         .offset = 0 */
-        /*     }, */ 
-        /*     1 */
-        /* ); */ 
+        SDL_BindGPUGraphicsPipeline(render_pass, debug_pipeline);
+        SDL_SetGPUViewport(render_pass, &small_viewport);
+        SDL_BindGPUVertexBuffers(
+            render_pass, 
+            0, 
+            &(SDL_GPUBufferBinding) {
+                .buffer = vertex_buffer_debug, 
+                .offset = 0
+            }, 
+            1
+        ); 
         /* SDL_BindGPUVertexStorageBuffers( */
         /*     render_pass, */
         /*     0, */
         /*     &live_data_buffer_debug, */
         /*     1 */
         /* ); */
-        /* SDL_BindGPUIndexBuffer( */
-        /*     render_pass, */ 
-        /*     &(SDL_GPUBufferBinding) { */ 
-        /*         .buffer = index_buffer_debug, */ 
-        /*         .offset = 0 */ 
-        /*     }, */ 
-        /*     SDL_GPU_INDEXELEMENTSIZE_16BIT */
-        /* ); */
-        /* SDL_DrawGPUIndexedPrimitives(render_pass, n_indices_debug, n_instances_debug, 0, 0, 0); */
+        SDL_BindGPUIndexBuffer(
+            render_pass, 
+            &(SDL_GPUBufferBinding) { 
+                .buffer = index_buffer_debug, 
+                .offset = 0 
+            }, 
+            SDL_GPU_INDEXELEMENTSIZE_16BIT
+        );
+        SDL_DrawGPUIndexedPrimitives(render_pass, n_indices_debug, 1, 0, 0, 0);
 
         SDL_EndGPURenderPass(render_pass);
 
