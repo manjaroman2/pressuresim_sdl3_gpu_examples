@@ -6,7 +6,7 @@
 
 #define WINDOW_WIDTH  1400 
 #define WINDOW_HEIGHT 1000 
-#define WINDOW_TITLE  "Pressure Simulation" 
+#define WINDOW_TITLE  "Instance indexed" 
 
 
 typedef struct PositionColorVertex {
@@ -90,7 +90,7 @@ void handle_event(SDL_Event event, bool* quit, int* index_offset, int* vertex_of
 }
 
 
-void print_info() {
+void print_info(void) {
     int render_drivers = SDL_GetNumRenderDrivers(); 
     printf("Number of render drivers: %i\n", render_drivers); 
 
@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
         return 1;   
     }
 
-    SDL_GPUShader* shader_frag = load_shader(device, "shaders/compiled/Circle.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
+    SDL_GPUShader* shader_frag = load_shader(device, "shaders/compiled/SolidColor.frag.spv", SDL_GPU_SHADERSTAGE_FRAGMENT, 0, 0, 0, 0); 
     if (shader_vert == NULL) {
         fprintf(stderr, "ERROR: load_shader failed.\n");
         return 1;   

@@ -1,12 +1,14 @@
 // A readable version of https://github.com/TheSpydog/SDL_gpu_examples/blob/main/Examples/BasicTriangle.c
 
 #include <SDL3/SDL_pixels.h>
+#include <SDL3/SDL_video.h>
 #include <stdio.h> 
 #include <stdlib.h> 
 #include <SDL3/SDL.h> 
 
 #define WINDOW_WIDTH 1200 
 #define WINDOW_HEIGHT 800 
+#define WINDOW_TITLE "Basic Triangle"
 
 
 SDL_GPUShader* load_shader(
@@ -61,7 +63,8 @@ SDL_GPUShader* load_shader(
     return shader; 
 }
 
-void print_info() {
+
+void print_info(void) {
     int render_drivers = SDL_GetNumRenderDrivers(); 
     printf("Number of render drivers: %i\n", render_drivers); 
 
@@ -77,31 +80,33 @@ void print_info() {
     }
 
     printf("Current video driver: %s\n", SDL_GetCurrentVideoDriver());
-
 }
+
 
 void handle_event(SDL_Event event, bool* quit) {
     switch (event.type) {
-        case SDL_EVENT_QUIT:  
+        case SDL_EVENT_QUIT: {  
             *quit = true; 
-            break; 
-        case SDL_EVENT_KEY_DOWN:
+        } break; 
+        case SDL_EVENT_KEY_DOWN: {  
             switch (event.key.key) {
-                case SDLK_Q:    
+                case SDLK_Q: {    
                     *quit = true; 
-                    break; 
-                case SDLK_W:    
-                    break; 
-                case SDLK_S:    
-                    break; 
-                case SDLK_D:    
-                    break; 
+                } break; 
+                case SDLK_W: {  
+                    
+                } break; 
+                case SDLK_S: {    
+                
+                } break; 
+                case SDLK_D: {
+
+                } break; 
             }
-
-            break; 
+        } break; 
     } 
-
 }
+
 
 int main(int argc, char* argv[]) {
     if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -110,7 +115,7 @@ int main(int argc, char* argv[]) {
     } 
 
     SDL_Window* window; 
-    window = SDL_CreateWindow("basic triangle", WINDOW_WIDTH, WINDOW_HEIGHT, 0); // SDL_WINDOW_VULKAN ? 
+    window = SDL_CreateWindow(WINDOW_TITLE, WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_VULKAN);
 
     if (window == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateWindow failed: %s\n", SDL_GetError());
@@ -179,8 +184,6 @@ int main(int argc, char* argv[]) {
 
     SDL_ReleaseGPUShader(device, shader_vert); 
     SDL_ReleaseGPUShader(device, shader_frag); 
-
-
 
     SDL_FColor COLOR_WHITE  = (SDL_FColor) { 1.0f, 1.0f, 1.0f, 1.0f }; 
     SDL_FColor COLOR_BLACK  = (SDL_FColor) { 0.0f, 0.0f, 0.0f, 1.0f }; 
