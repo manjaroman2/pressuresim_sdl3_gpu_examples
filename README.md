@@ -13,7 +13,8 @@ I recommend something like this:
 
 You can now use ./compile-shaders.sh, there is also 'libSDL3_shadercross', which can be linked, to compile shaders at runtime. 
 
-Use ./compile-gcc-and-run.sh to study the example. 
+Use ./compile-and-run.sh <example> to study an example.  
+e.g ./compile-and-run.sh basic-triangle  
 
 ### Todos
 
