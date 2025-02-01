@@ -154,28 +154,32 @@ void destroy_sdl(
 
 void handle_event(SDL_Event event, bool* quit, uint* sim_state) {
     switch (event.type) {
-        case SDL_EVENT_QUIT:  
+        case SDL_EVENT_QUIT: {
+
             *quit = true; 
-            break; 
-        case SDL_EVENT_KEY_DOWN:
+        } break; 
+        case SDL_EVENT_KEY_DOWN: {
             switch (event.key.key) {
-                case SDLK_Q:    
+                case SDLK_Q: {
                     *quit = true; 
-                    break; 
-                case SDLK_W:    
-                    break; 
-                case SDLK_S:    
-                    break; 
-                case SDLK_D:    
-                    break; 
-                case SDLK_SPACE:    
+                } break;  
+                case SDLK_W: {
+
+                } break; 
+                case SDLK_S: {
+
+                } break; 
+                case SDLK_D: {
+
+                } break; 
+                case SDLK_SPACE: {
                     if (*sim_state == 0)
                         *sim_state = 1; 
                     else if (*sim_state == 1)
                         *sim_state = 0; 
-                    break; 
+                } break;
             }
-            break; 
+        } break; 
     } 
 }
 
@@ -353,8 +357,7 @@ int physics_tick(
                     } else {
                         p->vx *= -1; 
                     }
-                } 
-                if (p->box.t < chunk_ref_top.chunk->box.b) { // top edge crossed bottom of top chunk 
+                } else if (p->box.t < chunk_ref_top.chunk->box.b) { // top edge crossed bottom of top chunk 
                     uint32_t p_index = chunk_ref_bottom.p_index; 
                     if (p_index < 0) {
                         return -1; 
@@ -435,8 +438,7 @@ int physics_tick(
                     } else {
                         p->vy *= -1; 
                     }
-                } 
-                if (p->box.r < chunk_ref_right.chunk->box.l) { // right edge crossed left of right chunk  
+                } else if (p->box.r < chunk_ref_right.chunk->box.l) { // right edge crossed left of right chunk  
                     p->chunk_state = ONE; 
                     chunk_pop(&chunk_ref_right); 
                     particle_update_chunk_ref(p, 0, chunk_ref_left.chunk, chunk_ref_left.p_index);
