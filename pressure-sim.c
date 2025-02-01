@@ -5,6 +5,8 @@
 #include <stdio.h> 
 #include <string.h>
 
+#define vec2_unpack(_vec) ((_vec).x), ((_vec).y)
+
 #define particle_collisions(_p, _chunk_ref) ({                                           \
     for (uint32_t j = 0; j < (_chunk_ref)->p_index; j++) {                               \
         collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
@@ -28,6 +30,7 @@
     (_chunk)->particles[_p_index] = (_p);                                  \
     (_chunk)->n_filled++;                                                  \
     (_chunk)->n_free--;                                                    \
+    /* printf("chunk_append (%d,%d)  n_filled=%d,n_free=%d,p->chunk_state=%d\n", (_chunk)->xy.x, (_chunk)->xy.y, (_chunk)->n_filled, (_chunk)->n_free, (_p)->chunk_state); */ \
     _p_index;                                                              \
 })
 
@@ -36,20 +39,16 @@
         fprintf(stderr, "ERROR: popping from empty chunk.\n");                                                             \
         abort();                                                                                                           \
     }                                                                                                                      \
-    if ((_chunk_ref)->chunk->n_filled == 1) {                                                                              \
-        fprintf(stderr, "chunk now empty.\n");                                                                             \
-        fprintf(stderr, "%d\n", (_chunk_ref)->chunk->particles[(_chunk_ref)->p_index]->id);                                \
-    }                                                                                                                      \
     (_chunk_ref)->chunk->n_filled--;                                                                                       \
     (_chunk_ref)->chunk->particles[(_chunk_ref)->p_index] = (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled]; \
-    (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled] = NULL;                                                  \
     (_chunk_ref)->chunk->n_free++;                                                                                         \
-    printf("chunk_pop free: %d\n", (_chunk_ref)->chunk->n_free);                                                           \
+    /* printf("chunk_pop (%d,%d)  n_filled=%d,n_free=%d,p->chunk_state=%d\n", (_chunk_ref)->chunk->xy.x, (_chunk_ref)->chunk->xy.y, (_chunk_ref)->chunk->n_filled, (_chunk_ref)->chunk->n_free, (_chunk_ref)->chunk->particles[(_chunk_ref)->p_index]->chunk_state); */                                                                        \
+    (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled] = NULL;                                                  \
 })
 
 #define box_overlap(_b1, _b2) ((_b1).r >= (_b2).l && (_b1).l <= (_b2).r && (_b1).t >= (_b2).b && (_b1).b <= (_b2).t) 
 
-#define N 10 
+#define N 1000 
 #define R 10.0f 
 #define WINDOW_WIDTH  1200
 #define WINDOW_HEIGHT 1000 
@@ -94,6 +93,7 @@ typedef struct Chunk {
     Box box;
     uint32_t n_filled; 
     uint32_t n_free; 
+    Vec2i xy; 
 } Chunk; 
 
 
@@ -219,74 +219,73 @@ int physics_tick(
         /* printf("particle #%d chunk_state:%d\n", i, p->chunk_state); */
         switch (p->chunk_state) {
             case ONE: {
-                ChunkRef* chunk_ref = &p->chunk_ref[0]; 
-                particle_collisions(p, chunk_ref);
-                if (p->box.b < chunk_ref->chunk->box.b) { // bottom edge crossed bottom 
-                    if (chunk_ref->chunk->bottom != NULL) {
-                        uint32_t p_index_bottom = chunk_append(chunk_ref->chunk->bottom, p);
+                ChunkRef chunk_ref = p->chunk_ref[0]; 
+                particle_collisions(p, &chunk_ref);
+                if (p->box.b < chunk_ref.chunk->box.b) { // bottom edge crossed bottom 
+                    if (chunk_ref.chunk->bottom != NULL) {
+                        uint32_t p_index_bottom = chunk_append(chunk_ref.chunk->bottom, p);
                         if (p_index_bottom < 0) {
                             return -1; 
                         }
-                        if (p->box.t < chunk_ref->chunk->box.b) { // top edge crossed bottom 
-                            chunk_pop(chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref->chunk->bottom, p_index_bottom); 
+                        if (p->box.t < chunk_ref.chunk->box.b) { // top edge crossed bottom 
+                            chunk_pop(&chunk_ref); 
+                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->bottom, p_index_bottom); 
                         } else {
                             p->chunk_state = TOP_BOTTOM;
-                            particle_update_chunk_ref(p, 2, chunk_ref->chunk, chunk_ref->p_index); 
-                            particle_update_chunk_ref(p, 3, chunk_ref->chunk->bottom, p_index_bottom); 
+                            particle_update_chunk_ref(p, 2, chunk_ref.chunk, chunk_ref.p_index); 
+                            particle_update_chunk_ref(p, 3, chunk_ref.chunk->bottom, p_index_bottom); 
                         }
                     } else {
                         p->vy *= -1; 
                     }
-                } else if (p->box.t > chunk_ref->chunk->box.t) { // top edge crossed top 
-                    if (chunk_ref->chunk->top != NULL) {
-                        uint32_t p_index_top = chunk_append(chunk_ref->chunk->top, p);
+                } else if (p->box.t > chunk_ref.chunk->box.t) { // top edge crossed top 
+                    if (chunk_ref.chunk->top != NULL) {
+                        uint32_t p_index_top = chunk_append(chunk_ref.chunk->top, p);
                         if (p_index_top < 0) {
                             return -1; 
                         }
-                        if (p->box.b > chunk_ref->chunk->box.t) { // bottom edge crossed top
-                            chunk_pop(chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref->chunk->top, p_index_top); 
+                        if (p->box.b > chunk_ref.chunk->box.t) { // bottom edge crossed top
+                            chunk_pop(&chunk_ref); 
+                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->top, p_index_top); 
                         } else {
                             p->chunk_state = TOP_BOTTOM; 
-                            particle_update_chunk_ref(p, 2, chunk_ref->chunk->top, p_index_top); 
-                            particle_update_chunk_ref(p, 3, chunk_ref->chunk, chunk_ref->p_index); 
+                            particle_update_chunk_ref(p, 2, chunk_ref.chunk->top, p_index_top); 
+                            particle_update_chunk_ref(p, 3, chunk_ref.chunk, chunk_ref.p_index); 
                         }
                     } else {
                         p->vy *= -1; 
                     }
                 }
-                if (p->box.l < chunk_ref->chunk->box.l) { // left edge crossed left 
-                    if (chunk_ref->chunk->left != NULL) {
-                        uint32_t p_index_left = chunk_append(chunk_ref->chunk->left, p);
+                if (p->box.l < chunk_ref.chunk->box.l) { // left edge crossed left 
+                    if (chunk_ref.chunk->left != NULL) {
+                        uint32_t p_index_left = chunk_append(chunk_ref.chunk->left, p);
                         if (p_index_left < 0) {
                             return -1;
                         } 
-                        if (p->box.r < chunk_ref->chunk->box.l) { // right edge crossed left 
-                            printf("T1\n");
-                            chunk_pop(chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref->chunk->left, p_index_left); 
+                        if (p->box.r < chunk_ref.chunk->box.l) { // right edge crossed left 
+                            chunk_pop(&chunk_ref); 
+                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->left, p_index_left); 
                         } else {
                             p->chunk_state = LEFT_RIGHT; 
-                            particle_update_chunk_ref(p, 0, chunk_ref->chunk->left, p_index_left); 
-                            particle_update_chunk_ref(p, 1, chunk_ref->chunk, chunk_ref->p_index); 
+                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->left, p_index_left); 
+                            particle_update_chunk_ref(p, 1, chunk_ref.chunk, chunk_ref.p_index); 
                         }
                     } else {
                         p->vx *= -1; 
                     }
-                } else if (p->box.r > chunk_ref->chunk->box.r) { // right edge crossed right 
-                    if (chunk_ref->chunk->right != NULL) {
-                        uint32_t p_index_right = chunk_append(chunk_ref->chunk->right, p);
+                } else if (p->box.r > chunk_ref.chunk->box.r) { // right edge crossed right 
+                    if (chunk_ref.chunk->right != NULL) {
+                        uint32_t p_index_right = chunk_append(chunk_ref.chunk->right, p);
                         if (p_index_right < 0) {
                             return -1; 
                         }
-                        if (p->box.l > chunk_ref->chunk->box.r) { // left edge crossed right
-                            chunk_pop(chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref->chunk->right, p_index_right); 
+                        if (p->box.l > chunk_ref.chunk->box.r) { // left edge crossed right
+                            chunk_pop(&chunk_ref); 
+                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->right, p_index_right); 
                         } else {
                             p->chunk_state = LEFT_RIGHT;
-                            particle_update_chunk_ref(p, 0, chunk_ref->chunk, chunk_ref->p_index); 
-                            particle_update_chunk_ref(p, 1, chunk_ref->chunk->right, p_index_right); 
+                            particle_update_chunk_ref(p, 0, chunk_ref.chunk, chunk_ref.p_index); 
+                            particle_update_chunk_ref(p, 1, chunk_ref.chunk->right, p_index_right); 
                         }
                     } else {
                         p->vx *= -1; 
@@ -294,30 +293,30 @@ int physics_tick(
                 }
             } break;
             case TOP_BOTTOM: { 
-                ChunkRef* chunk_ref_top = &p->chunk_ref[2]; 
-                ChunkRef* chunk_ref_bottom = &p->chunk_ref[3]; 
-                particle_collisions(p, chunk_ref_top);
-                particle_collisions(p, chunk_ref_bottom);
-                if (p->box.r > chunk_ref_bottom->chunk->box.r) { // right edge crossed right
-                    if (chunk_ref_bottom->chunk->right != NULL) {
-                        Chunk* chunk_bottom_right = chunk_ref_bottom->chunk->right; 
-                        Chunk* chunk_top_right = chunk_ref_top->chunk->right; 
+                ChunkRef chunk_ref_top = p->chunk_ref[2]; 
+                ChunkRef chunk_ref_bottom = p->chunk_ref[3]; 
+                particle_collisions(p, &chunk_ref_top);
+                particle_collisions(p, &chunk_ref_bottom);
+                if (p->box.r > chunk_ref_bottom.chunk->box.r) { // right edge crossed right
+                    if (chunk_ref_bottom.chunk->right != NULL) {
+                        Chunk* chunk_bottom_right = chunk_ref_bottom.chunk->right; 
+                        Chunk* chunk_top_right = chunk_ref_top.chunk->right; 
                         uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p); 
                         uint32_t p_index_top_right = chunk_append(chunk_top_right, p); 
                         if (p_index_bottom_right < 0 || p_index_top_right < 0) {
                             return -1; 
                         }
-                        if (p->box.l > chunk_ref_bottom->chunk->box.r) { // left edge crossed right 
-                            chunk_pop(chunk_ref_top); 
-                            chunk_pop(chunk_ref_bottom); 
+                        if (p->box.l > chunk_ref_bottom.chunk->box.r) { // left edge crossed right 
+                            chunk_pop(&chunk_ref_top); 
+                            chunk_pop(&chunk_ref_bottom); 
                             particle_update_chunk_ref(p, 2, chunk_top_right, p_index_top_right); 
                             particle_update_chunk_ref(p, 3, chunk_bottom_right, p_index_bottom_right); 
                         } else {
                             p->chunk_state = LRTB; 
-                            Chunk* chunk_top_left = chunk_ref_top->chunk; 
-                            Chunk* chunk_bottom_left = chunk_ref_bottom->chunk; 
-                            uint32_t p_index_top_left = chunk_ref_top->p_index;
-                            uint32_t p_index_bottom_left = chunk_ref_bottom->p_index;
+                            Chunk* chunk_top_left = chunk_ref_top.chunk; 
+                            Chunk* chunk_bottom_left = chunk_ref_bottom.chunk; 
+                            uint32_t p_index_top_left = chunk_ref_top.p_index;
+                            uint32_t p_index_bottom_left = chunk_ref_bottom.p_index;
                             particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
                             particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
                             particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
@@ -326,26 +325,26 @@ int physics_tick(
                     } else {
                         p->vx *= -1; 
                     }
-                } else if (p->box.l < chunk_ref_bottom->chunk->box.l) { // left edge crossed left 
-                    if (chunk_ref_bottom->chunk->left != NULL) {
-                        Chunk* chunk_top_left = chunk_ref_top->chunk->left;
-                        Chunk* chunk_bottom_left = chunk_ref_bottom->chunk->left;
-                        uint32_t p_index_bottom_left = chunk_append(chunk_ref_bottom->chunk->left, p); 
-                        uint32_t p_index_top_left = chunk_append(chunk_ref_top->chunk->left, p); 
+                } else if (p->box.l < chunk_ref_bottom.chunk->box.l) { // left edge crossed left 
+                    if (chunk_ref_bottom.chunk->left != NULL) {
+                        Chunk* chunk_top_left = chunk_ref_top.chunk->left;
+                        Chunk* chunk_bottom_left = chunk_ref_bottom.chunk->left;
+                        uint32_t p_index_bottom_left = chunk_append(chunk_ref_bottom.chunk->left, p); 
+                        uint32_t p_index_top_left = chunk_append(chunk_ref_top.chunk->left, p); 
                         if (p_index_bottom_left < 0 || p_index_top_left < 0) {
                             return -1; 
                         }
-                        if (p->box.r < chunk_ref_bottom->chunk->box.l) { // right edge crossed left 
-                            chunk_pop(chunk_ref_top); 
-                            chunk_pop(chunk_ref_bottom); 
+                        if (p->box.r < chunk_ref_bottom.chunk->box.l) { // right edge crossed left 
+                            chunk_pop(&chunk_ref_top); 
+                            chunk_pop(&chunk_ref_bottom); 
                             particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
                             particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
                         } else {
                             p->chunk_state = LRTB; 
-                            Chunk* chunk_top_right = chunk_ref_top->chunk; 
-                            Chunk* chunk_bottom_right = chunk_ref_bottom->chunk; 
-                            uint32_t p_index_top_right = chunk_ref_top->p_index;
-                            uint32_t p_index_bottom_right = chunk_ref_bottom->p_index;
+                            Chunk* chunk_top_right = chunk_ref_top.chunk; 
+                            Chunk* chunk_bottom_right = chunk_ref_bottom.chunk; 
+                            uint32_t p_index_top_right = chunk_ref_top.p_index;
+                            uint32_t p_index_bottom_right = chunk_ref_bottom.p_index;
                             particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
                             particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
                             particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
@@ -354,47 +353,52 @@ int physics_tick(
                     } else {
                         p->vx *= -1; 
                     }
-                } else { // could be a problem, if we cross on y and x axis at the same time 
-                    if (p->box.t < chunk_ref_top->chunk->box.b) { // top edge crossed bottom of top chunk 
-                        chunk_pop(chunk_ref_top); 
-                        p->chunk_state = ONE; 
-                        uint32_t p_index = chunk_ref_bottom->p_index; 
-                        Chunk* chunk = chunk_ref_bottom->chunk;
-                        particle_update_chunk_ref(p, 0, chunk, p_index); 
-                    } else if (p->box.b > chunk_ref_bottom->chunk->box.t) { // bottom edge crossed top of bottom chunk
-                        chunk_pop(chunk_ref_bottom); 
-                        p->chunk_state = ONE; 
-                        uint32_t p_index = chunk_ref_top->p_index; 
-                        Chunk* chunk = chunk_ref_top->chunk;
-                        particle_update_chunk_ref(p, 0, chunk, p_index); 
+                } 
+                if (p->box.t < chunk_ref_top.chunk->box.b) { // top edge crossed bottom of top chunk 
+                    uint32_t p_index = chunk_ref_bottom.p_index; 
+                    if (p_index < 0) {
+                        return -1; 
                     }
+                    p->chunk_state = ONE; 
+                    chunk_pop(&chunk_ref_top); 
+                    Chunk* chunk = chunk_ref_bottom.chunk;
+                    particle_update_chunk_ref(p, 0, chunk, p_index); 
+                } else if (p->box.b > chunk_ref_bottom.chunk->box.t) { // bottom edge crossed top of bottom chunk
+                    uint32_t p_index = chunk_ref_top.p_index; 
+                    if (p_index < 0) {
+                        return -1; 
+                    }
+                    p->chunk_state = ONE; 
+                    chunk_pop(&chunk_ref_bottom); 
+                    Chunk* chunk = chunk_ref_top.chunk;
+                    particle_update_chunk_ref(p, 0, chunk, p_index); 
                 }
             } break;
             case LEFT_RIGHT: {
-                ChunkRef* chunk_ref_left = &p->chunk_ref[0]; 
-                ChunkRef* chunk_ref_right = &p->chunk_ref[1]; 
-                particle_collisions(p, chunk_ref_left);
-                particle_collisions(p, chunk_ref_right);
-                if (p->box.t > chunk_ref_left->chunk->box.t) { // top edge crossed top  
-                    if (chunk_ref_left->chunk->top != NULL) {
-                        Chunk* chunk_top_left = chunk_ref_left->chunk->top; 
-                        Chunk* chunk_top_right = chunk_ref_right->chunk->top; 
+                ChunkRef chunk_ref_left = p->chunk_ref[0]; 
+                ChunkRef chunk_ref_right = p->chunk_ref[1]; 
+                particle_collisions(p, &chunk_ref_left);
+                particle_collisions(p, &chunk_ref_right);
+                if (p->box.t > chunk_ref_left.chunk->box.t) { // top edge crossed top  
+                    if (chunk_ref_left.chunk->top != NULL) {
+                        Chunk* chunk_top_left = chunk_ref_left.chunk->top; 
+                        Chunk* chunk_top_right = chunk_ref_right.chunk->top; 
                         uint32_t p_index_top_left = chunk_append(chunk_top_left, p); 
                         uint32_t p_index_top_right = chunk_append(chunk_top_right, p); 
                         if (p_index_top_left < 0 || p_index_top_right < 0) {
                             return -1; 
                         }
-                        if (p->box.b > chunk_ref_left->chunk->box.t) { // bottom edge crossed top 
-                            chunk_pop(chunk_ref_left); 
-                            chunk_pop(chunk_ref_right); 
+                        if (p->box.b > chunk_ref_left.chunk->box.t) { // bottom edge crossed top 
+                            chunk_pop(&chunk_ref_left); 
+                            chunk_pop(&chunk_ref_right); 
                             particle_update_chunk_ref(p, 0, chunk_top_left, p_index_top_left); 
                             particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
                         } else { 
                             p->chunk_state = LRTB; 
-                            Chunk* chunk_bottom_left = chunk_ref_left->chunk; 
-                            Chunk* chunk_bottom_right = chunk_ref_right->chunk; 
-                            uint32_t p_index_bottom_left = chunk_ref_left->p_index;
-                            uint32_t p_index_bottom_right = chunk_ref_right->p_index;
+                            Chunk* chunk_bottom_left = chunk_ref_left.chunk; 
+                            Chunk* chunk_bottom_right = chunk_ref_right.chunk; 
+                            uint32_t p_index_bottom_left = chunk_ref_left.p_index;
+                            uint32_t p_index_bottom_right = chunk_ref_right.p_index;
                             particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
                             particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
                             particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
@@ -403,26 +407,26 @@ int physics_tick(
                     } else {
                         p->vy *= -1; 
                     }
-                } else if (p->box.b < chunk_ref_left->chunk->box.b) { // bottom edge crossed bottom 
-                    if (chunk_ref_left->chunk->bottom != NULL) {
-                        Chunk* chunk_bottom_left = chunk_ref_left->chunk->bottom; 
-                        Chunk* chunk_bottom_right = chunk_ref_right->chunk->bottom; 
+                } else if (p->box.b < chunk_ref_left.chunk->box.b) { // bottom edge crossed bottom 
+                    if (chunk_ref_left.chunk->bottom != NULL) {
+                        Chunk* chunk_bottom_left = chunk_ref_left.chunk->bottom; 
+                        Chunk* chunk_bottom_right = chunk_ref_right.chunk->bottom; 
                         uint32_t p_index_bottom_left = chunk_append(chunk_bottom_left, p); 
                         uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p); 
                         if (p_index_bottom_left < 0 || p_index_bottom_right < 0) {
                             return -1; 
                         }
-                        if (p->box.t < chunk_ref_left->chunk->box.b) { // top edge crossed bottom  
-                            chunk_pop(chunk_ref_left); 
-                            chunk_pop(chunk_ref_right); 
+                        if (p->box.t < chunk_ref_left.chunk->box.b) { // top edge crossed bottom  
+                            chunk_pop(&chunk_ref_left); 
+                            chunk_pop(&chunk_ref_right); 
                             particle_update_chunk_ref(p, 0, chunk_bottom_left, p_index_bottom_left); 
                             particle_update_chunk_ref(p, 1, chunk_bottom_right, p_index_bottom_right); 
                         } else { 
                             p->chunk_state = LRTB; 
-                            Chunk* chunk_top_left = chunk_ref_left->chunk; 
-                            Chunk* chunk_top_right = chunk_ref_right->chunk; 
-                            uint32_t p_index_top_left = chunk_ref_left->p_index;
-                            uint32_t p_index_top_right = chunk_ref_right->p_index;
+                            Chunk* chunk_top_left = chunk_ref_left.chunk; 
+                            Chunk* chunk_top_right = chunk_ref_right.chunk; 
+                            uint32_t p_index_top_left = chunk_ref_left.p_index;
+                            uint32_t p_index_top_right = chunk_ref_right.p_index;
                             particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
                             particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
                             particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
@@ -431,51 +435,50 @@ int physics_tick(
                     } else {
                         p->vy *= -1; 
                     }
-                } else { // could be a problem, if we cross on y and x axis at the same time 
-                    if (p->box.r < chunk_ref_right->chunk->box.l) { // right edge crossed left of right chunk  
-                        chunk_pop(chunk_ref_right); 
-                        p->chunk_state = ONE; 
-                        particle_update_chunk_ref(p, 0, chunk_ref_left->chunk, chunk_ref_left->p_index);
-                    } else if (p->box.l > chunk_ref_left->chunk->box.r) { // left edge crossed right of left chunk 
-                        chunk_pop(chunk_ref_left); 
-                        p->chunk_state = ONE; 
-                        particle_update_chunk_ref(p, 0, chunk_ref_right->chunk, chunk_ref_right->p_index);
-                    }
+                } 
+                if (p->box.r < chunk_ref_right.chunk->box.l) { // right edge crossed left of right chunk  
+                    p->chunk_state = ONE; 
+                    chunk_pop(&chunk_ref_right); 
+                    particle_update_chunk_ref(p, 0, chunk_ref_left.chunk, chunk_ref_left.p_index);
+                } else if (p->box.l > chunk_ref_left.chunk->box.r) { // left edge crossed right of left chunk 
+                    p->chunk_state = ONE; 
+                    chunk_pop(&chunk_ref_left); 
+                    particle_update_chunk_ref(p, 0, chunk_ref_right.chunk, chunk_ref_right.p_index);
                 }
             } break;
             case LRTB: {
-                ChunkRef* chunk_ref_bottom_right = &p->chunk_ref[0]; 
-                ChunkRef* chunk_ref_top_right = &p->chunk_ref[1]; 
-                ChunkRef* chunk_ref_top_left = &p->chunk_ref[2]; 
-                ChunkRef* chunk_ref_bottom_left = &p->chunk_ref[3]; 
-                particle_collisions(p, chunk_ref_bottom_right);
-                particle_collisions(p, chunk_ref_top_right);
-                particle_collisions(p, chunk_ref_top_left);
-                particle_collisions(p, chunk_ref_bottom_left);
-                if (p->box.l > chunk_ref_top_left->chunk->box.r) { // left edge crossed right of left
-                    chunk_pop(chunk_ref_top_left); 
-                    chunk_pop(chunk_ref_bottom_left); 
+                ChunkRef chunk_ref_bottom_right = p->chunk_ref[0]; 
+                ChunkRef chunk_ref_top_right = p->chunk_ref[1]; 
+                ChunkRef chunk_ref_top_left = p->chunk_ref[2]; 
+                ChunkRef chunk_ref_bottom_left = p->chunk_ref[3]; 
+                particle_collisions(p, &chunk_ref_bottom_right);
+                particle_collisions(p, &chunk_ref_top_right);
+                particle_collisions(p, &chunk_ref_top_left);
+                particle_collisions(p, &chunk_ref_bottom_left);
+                if (p->box.l > chunk_ref_top_left.chunk->box.r) { // left edge crossed right of left
                     p->chunk_state = TOP_BOTTOM;
-                    particle_update_chunk_ref(p, 2, chunk_ref_top_right->chunk, chunk_ref_top_right->p_index); 
-                    particle_update_chunk_ref(p, 3, chunk_ref_bottom_right->chunk, chunk_ref_bottom_right->p_index); 
-                } else if (p->box.r < chunk_ref_top_right->chunk->box.l) { // right edge crossed left of right 
-                    chunk_pop(chunk_ref_top_right); 
-                    chunk_pop(chunk_ref_bottom_right); 
+                    chunk_pop(&chunk_ref_top_left); 
+                    chunk_pop(&chunk_ref_bottom_left); 
+                    particle_update_chunk_ref(p, 2, chunk_ref_top_right.chunk, chunk_ref_top_right.p_index); 
+                    particle_update_chunk_ref(p, 3, chunk_ref_bottom_right.chunk, chunk_ref_bottom_right.p_index); 
+                } else if (p->box.r < chunk_ref_top_right.chunk->box.l) { // right edge crossed left of right 
                     p->chunk_state = TOP_BOTTOM;
-                    particle_update_chunk_ref(p, 2, chunk_ref_top_left->chunk, chunk_ref_top_left->p_index); 
-                    particle_update_chunk_ref(p, 3, chunk_ref_bottom_left->chunk, chunk_ref_bottom_left->p_index); 
-                } else if (p->box.b > chunk_ref_bottom_left->chunk->box.t) { // bottom edge crossed top of bottom 
-                    chunk_pop(chunk_ref_bottom_left); 
-                    chunk_pop(chunk_ref_bottom_right); 
+                    chunk_pop(&chunk_ref_top_right); 
+                    chunk_pop(&chunk_ref_bottom_right); 
+                    particle_update_chunk_ref(p, 2, chunk_ref_top_left.chunk, chunk_ref_top_left.p_index); 
+                    particle_update_chunk_ref(p, 3, chunk_ref_bottom_left.chunk, chunk_ref_bottom_left.p_index); 
+                } else if (p->box.b > chunk_ref_bottom_left.chunk->box.t) { // bottom edge crossed top of bottom 
                     p->chunk_state = LEFT_RIGHT;
-                    particle_update_chunk_ref(p, 0, chunk_ref_top_left->chunk, chunk_ref_top_left->p_index); 
-                    particle_update_chunk_ref(p, 1, chunk_ref_top_right->chunk, chunk_ref_bottom_left->p_index); 
-                } else if (p->box.t < chunk_ref_top_left->chunk->box.b) { // top edge crossed bottom of top 
-                    chunk_pop(chunk_ref_top_left); 
-                    chunk_pop(chunk_ref_top_right); 
+                    chunk_pop(&chunk_ref_bottom_left); 
+                    chunk_pop(&chunk_ref_bottom_right); 
+                    particle_update_chunk_ref(p, 0, chunk_ref_top_left.chunk, chunk_ref_top_left.p_index); 
+                    particle_update_chunk_ref(p, 1, chunk_ref_top_right.chunk, chunk_ref_bottom_left.p_index); 
+                } else if (p->box.t < chunk_ref_top_left.chunk->box.b) { // top edge crossed bottom of top 
                     p->chunk_state = LEFT_RIGHT;
-                    particle_update_chunk_ref(p, 0, chunk_ref_bottom_left->chunk, chunk_ref_bottom_left->p_index); 
-                    particle_update_chunk_ref(p, 1, chunk_ref_bottom_right->chunk, chunk_ref_bottom_right->p_index); 
+                    chunk_pop(&chunk_ref_top_left); 
+                    chunk_pop(&chunk_ref_top_right); 
+                    particle_update_chunk_ref(p, 0, chunk_ref_bottom_left.chunk, chunk_ref_bottom_left.p_index); 
+                    particle_update_chunk_ref(p, 1, chunk_ref_bottom_right.chunk, chunk_ref_bottom_right.p_index); 
                 }
             } break;
             default: {
@@ -545,6 +548,8 @@ int setup_simulation_memory(
             chunk->top = NULL; 
             chunk->n_filled = 0; 
             chunk->n_free = n_max_particles_per_chunk;
+            chunk->xy.x = i; 
+            chunk->xy.y = j; 
         }
     }
 
@@ -634,8 +639,8 @@ int setup_particles(
 
         p->vx = rand_float(-v_start, v_start); 
         p->vy = rand_float(-v_start, v_start); 
-        p->vx = 1000.0f;  
-        p->vy = 0.0f;  
+        /* p->vx = 1000.0f; */  
+        /* p->vy = 0.0f; */  
 
         p->id = i;
     }
@@ -654,8 +659,7 @@ int setup_particles(
                                 return -1; 
                             }
                             p->chunk_state = ONE; 
-                            p->chunk_ref[0].chunk = chunk; 
-                            p->chunk_ref[0].p_index = p_index; 
+                            particle_update_chunk_ref(p, 0, chunk, p_index); 
                         } break; 
                         case ONE: {
                               if (p->chunk_ref[0].chunk->right == chunk) { // the way we iterate, we only have to check if its a chunk to the right  
@@ -664,20 +668,17 @@ int setup_particles(
                                         fprintf(stderr, "ERROR: chunk_append failed.\n");
                                         return -1; 
                                     }
-                                    p->chunk_state = LEFT_RIGHT; // 0 1  
-                                    p->chunk_ref[1].chunk = chunk; 
-                                    p->chunk_ref[1].p_index = p_index; 
+                                    p->chunk_state = LEFT_RIGHT; 
+                                    particle_update_chunk_ref(p, 1, chunk, p_index); 
                               } else if (p->chunk_ref[0].chunk->top == chunk) {
                                     uint32_t p_index = chunk_append(chunk, p);
                                     if (p_index < 0) {
                                         fprintf(stderr, "ERROR: chunk_append failed.\n");
                                         return -1; 
                                     }
-                                    p->chunk_state = TOP_BOTTOM; // 2 / 3 
-                                    p->chunk_ref[2].chunk = chunk; 
-                                    p->chunk_ref[2].p_index = p_index; 
-                                    p->chunk_ref[3].chunk = p->chunk_ref[0].chunk; 
-                                    p->chunk_ref[3].p_index = p->chunk_ref[0].p_index; 
+                                    p->chunk_state = TOP_BOTTOM; 
+                                    particle_update_chunk_ref(p, 2, chunk, p_index); 
+                                    particle_update_chunk_ref(p, 3, p->chunk_ref[0].chunk, p->chunk_ref[0].p_index); 
                               }
                         } break; 
                         case TOP_BOTTOM: { 
@@ -690,19 +691,16 @@ int setup_particles(
                                 return -1; 
                             }
                             p->chunk_state = LRTB; 
-                            // 2 1
-                            // 3 0 
-                            p->chunk_ref[0].chunk = chunk_bottom_right; 
-                            p->chunk_ref[0].p_index = p_index_bottom_right; 
-                            p->chunk_ref[1].chunk = chunk_top_right;  
-                            p->chunk_ref[1].p_index = p_index_top_right; 
+                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right);
+                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right);
                         } break; 
                         case LEFT_RIGHT: { 
                             Chunk* chunk_top_left = p->chunk_ref[0].chunk->top; 
                             Chunk* chunk_top_right = p->chunk_ref[1].chunk->top; 
                             Chunk* chunk_bottom_right = p->chunk_ref[1].chunk; 
-                            uint32_t p_index_bottom_right = p->chunk_ref[1].p_index; 
                             Chunk* chunk_bottom_left = p->chunk_ref[0].chunk; 
+
+                            uint32_t p_index_bottom_right = p->chunk_ref[1].p_index; 
                             uint32_t p_index_bottom_left = p->chunk_ref[0].p_index; 
                             uint32_t p_index_top_left = chunk_append(chunk_top_left, p);
                             uint32_t p_index_top_right = chunk_append(chunk_top_right, p);
@@ -711,23 +709,17 @@ int setup_particles(
                                 return -1; 
                             }
                             p->chunk_state = LRTB; 
-                            // 2 1
-                            // 3 0 
-                            p->chunk_ref[0].chunk = chunk_bottom_right; 
-                            p->chunk_ref[0].p_index = p_index_bottom_right; 
-                            p->chunk_ref[1].chunk = chunk_top_right;  
-                            p->chunk_ref[1].p_index = p_index_top_right; 
-                            p->chunk_ref[2].chunk = chunk_top_left; 
-                            p->chunk_ref[2].p_index = p_index_top_left; 
-                            p->chunk_ref[3].chunk = chunk_bottom_left;  
-                            p->chunk_ref[3].p_index = p_index_bottom_left; 
+                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
+                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
+                            particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
+                            particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
                         } break; 
                         case LRTB: {
                             // nothing to do here 
                         } break; 
                     }
-                    printf("set particle %d -> chunk<%d,%d>\n", k, i, j);
-                    printf("(%d,%d) free: %d\n", i, j, chunk->n_free);
+                    /* printf("set particle %d -> chunk<%d,%d>\n", k, i, j); */
+                    /* printf("(%d,%d) free: %d\n", i, j, chunk->n_free); */
                     /* p->chunks[p->n_chunks] = chunk; */ 
                     /* p->n_chunks++; */ 
                 }
@@ -1013,7 +1005,8 @@ int main(int argc, char* argv[]) {
     Chunk** border_chunks = NULL;
     uint32_t n_border_chunks = 2 * (chunkmap_info.n.x+chunkmap_info.n.y) - 4; 
     uint32_t n_max_particles_per_chunk = 2 * chunkmap_info.size.x * chunkmap_info.size.y / (particle_radius * particle_radius); 
-    printf("%d\n", n_max_particles_per_chunk);
+    printf("chunk_grid: (x:%d,y:%d)\n", chunkmap_info.n.x, chunkmap_info.n.y);
+    printf("n_max_particles_per_chunk:%d\n", n_max_particles_per_chunk);
 
     Particle* particles = NULL; 
 
