@@ -15,7 +15,7 @@ You can now use ./compile-shaders.sh, there is also 'libSDL3_shadercross', which
 
 Use ./compile-gcc-and-run.sh to study the example. 
 
-###Todos
+### Todos
 
 * container size should not stretch the paricles
 * chunk grid shader
