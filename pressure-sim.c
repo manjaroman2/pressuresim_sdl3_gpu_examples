@@ -22,17 +22,20 @@
     (_p)->chunk_ref[(_i)].p_index = (_p_index);                \
 }) 
 
-#define chunk_append(_chunk, _p) ({                                        \
-    if ((_chunk)->n_free == 0) {                                           \
-        fprintf(stderr, "ERROR: Cannot append particle to full chunk.\n"); \
-        -1;                                                                \
-    }                                                                      \
-    uint32_t _p_index = (_chunk)->n_filled;                                \
-    (_chunk)->particles[_p_index] = (_p);                                  \
-    (_chunk)->n_filled++;                                                  \
-    (_chunk)->n_free--;                                                    \
-    /* printf("chunk_append (%d,%d)  n_filled=%d,n_free=%d,p->chunk_state=%d\n", (_chunk)->xy.x, (_chunk)->xy.y, (_chunk)->n_filled, (_chunk)->n_free, (_p)->chunk_state); */ \
-    _p_index;                                                              \
+#define chunk_append(_chunk, _p) ({                                            \
+    uint32_t _p_index = UINT32_MAX;                                            \
+    do {                                                                       \
+        if ((_chunk)->n_free == 0) {                                           \
+            fprintf(stderr, "ERROR: Cannot append particle to full chunk.\n"); \
+            break;                                                             \
+        }                                                                      \
+        _p_index = (_chunk)->n_filled;                                         \
+        (_chunk)->particles[_p_index] = (_p);                                  \
+        (_chunk)->n_filled++;                                                  \
+        (_chunk)->n_free--;                                                    \
+        /* printf("chunk_append (%d,%d)  n_filled=%d,n_free=%d,p->chunk_state=%d\n", (_chunk)->xy.x, (_chunk)->xy.y, (_chunk)->n_filled, (_chunk)->n_free, (_p)->chunk_state); */ \
+    } while(0);                                                                \
+    _p_index;                                                                  \
 })
 
 #define chunk_pop(_chunk_ref) ({                                                                                           \
@@ -49,8 +52,8 @@
 
 #define box_overlap(_b1, _b2) ((_b1).r >= (_b2).l && (_b1).l <= (_b2).r && (_b1).t >= (_b2).b && (_b1).b <= (_b2).t) 
 
-#define N 1000 
-#define R 10.0f 
+#define N 50000
+#define R 2.0f 
 #define WINDOW_WIDTH  1200
 #define WINDOW_HEIGHT 1000 
 
@@ -131,17 +134,96 @@ typedef struct Container {
 } Container; 
 
 
+void vulkan_buffers_create(
+    SDL_GPUDevice* device, 
+    SDL_GPUBuffer** vertex_buffer_ptr,
+    size_t vertex_size,
+    uint32_t n_vertices,
+    SDL_GPUBuffer** index_buffer_ptr,
+    uint32_t n_indices,
+    SDL_GPUTransferBuffer** transfer_buffer_ptr,
+    void** transfer_data_ptr) {
+
+    *vertex_buffer_ptr = SDL_CreateGPUBuffer( // this is safe!
+        device, 
+        &(SDL_GPUBufferCreateInfo) {
+            .usage = SDL_GPU_BUFFERUSAGE_VERTEX, 
+            .size = vertex_size * n_vertices
+        }
+    ); 
+
+    *index_buffer_ptr = SDL_CreateGPUBuffer(
+        device, 
+        &(SDL_GPUBufferCreateInfo) {
+            .usage = SDL_GPU_BUFFERUSAGE_INDEX, 
+            .size = sizeof(uint16_t) * n_indices 
+        }
+    ); 
+
+    *transfer_buffer_ptr = SDL_CreateGPUTransferBuffer( // this is safe!
+        device,
+        &(SDL_GPUTransferBufferCreateInfo) {
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = (vertex_size * n_vertices) + (sizeof(uint16_t) * n_indices)
+        }
+    );
+
+    *transfer_data_ptr = SDL_MapGPUTransferBuffer(device, *transfer_buffer_ptr, false);
+}
+
+
+void vulkan_buffers_upload(SDL_GPUDevice* device, SDL_GPUBuffer* vertex_buffer, size_t vertex_size, uint32_t n_vertices, SDL_GPUBuffer* index_buffer, uint32_t n_indices, SDL_GPUTransferBuffer* transfer_buffer) {
+    SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
+    SDL_GPUCommandBuffer* upload_cmdbuf = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(upload_cmdbuf);
+    SDL_UploadToGPUBuffer(
+        copy_pass,
+        &(SDL_GPUTransferBufferLocation) {
+            .transfer_buffer = transfer_buffer,
+            .offset = 0
+        },
+        &(SDL_GPUBufferRegion) {
+            .buffer = vertex_buffer,
+            .offset = 0,
+            .size = vertex_size * n_vertices 
+        },
+        false
+    );
+    SDL_UploadToGPUBuffer(
+        copy_pass,
+        &(SDL_GPUTransferBufferLocation) {
+            .transfer_buffer = transfer_buffer,
+            .offset = vertex_size * n_vertices
+        },
+        &(SDL_GPUBufferRegion) {
+            .buffer = index_buffer,
+            .offset = 0,
+            .size = sizeof(uint16_t) * n_indices
+        },
+        false
+    );
+    SDL_EndGPUCopyPass(copy_pass);
+    SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
+    SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
+}
+
+
 void destroy_sdl(
     SDL_GPUDevice* device, 
     SDL_GPUGraphicsPipeline* pipeline, 
-    SDL_GPUGraphicsPipeline* debug_pipeline, 
     SDL_GPUBuffer* vertex_buffer, 
     SDL_GPUBuffer* index_buffer, 
     SDL_GPUTransferBuffer* live_data_transfer_buffer, 
     SDL_GPUBuffer* live_data_buffer, 
+    SDL_GPUGraphicsPipeline* debug_pipeline, 
+    SDL_GPUBuffer* vertex_buffer_debug, 
+    SDL_GPUBuffer* index_buffer_debug, 
     SDL_Window* window) {
 
     SDL_ReleaseGPUGraphicsPipeline(device, debug_pipeline);
+    SDL_ReleaseGPUBuffer(device, vertex_buffer_debug); 
+    SDL_ReleaseGPUBuffer(device, index_buffer_debug); 
+
     SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
     SDL_ReleaseGPUBuffer(device, vertex_buffer); 
     SDL_ReleaseGPUBuffer(device, index_buffer); 
@@ -210,6 +292,9 @@ int physics_tick(
 
     for (uint32_t i = 0; i < n_particles; i++) {
         Particle* p = &particles[i]; 
+        // p->vy -= 1.0f; 
+        p->vx += rand_float(-10.0f, 100.0f);  
+        p->vy += rand_float(-100.0f, 10.0f);
         float dx = p->vx*dt; 
         float dy = p->vy*dt; 
         p->x += dx;  
@@ -231,7 +316,7 @@ int physics_tick(
                 if (p->box.b < chunk_ref.chunk->box.b) { // bottom edge crossed bottom 
                     if (chunk_ref.chunk->bottom != NULL) {
                         uint32_t p_index_bottom = chunk_append(chunk_ref.chunk->bottom, p);
-                        if (p_index_bottom < 0) {
+                        if (p_index_bottom == UINT32_MAX) {
                             return -1; 
                         }
                         if (p->box.t < chunk_ref.chunk->box.b) { // top edge crossed bottom 
@@ -248,7 +333,7 @@ int physics_tick(
                 } else if (p->box.t > chunk_ref.chunk->box.t) { // top edge crossed top 
                     if (chunk_ref.chunk->top != NULL) {
                         uint32_t p_index_top = chunk_append(chunk_ref.chunk->top, p);
-                        if (p_index_top < 0) {
+                        if (p_index_top == UINT32_MAX) {
                             return -1; 
                         }
                         if (p->box.b > chunk_ref.chunk->box.t) { // bottom edge crossed top
@@ -266,7 +351,7 @@ int physics_tick(
                 if (p->box.l < chunk_ref.chunk->box.l) { // left edge crossed left 
                     if (chunk_ref.chunk->left != NULL) {
                         uint32_t p_index_left = chunk_append(chunk_ref.chunk->left, p);
-                        if (p_index_left < 0) {
+                        if (p_index_left == UINT32_MAX) {
                             return -1;
                         } 
                         if (p->box.r < chunk_ref.chunk->box.l) { // right edge crossed left 
@@ -283,7 +368,7 @@ int physics_tick(
                 } else if (p->box.r > chunk_ref.chunk->box.r) { // right edge crossed right 
                     if (chunk_ref.chunk->right != NULL) {
                         uint32_t p_index_right = chunk_append(chunk_ref.chunk->right, p);
-                        if (p_index_right < 0) {
+                        if (p_index_right == UINT32_MAX) {
                             return -1; 
                         }
                         if (p->box.l > chunk_ref.chunk->box.r) { // left edge crossed right
@@ -310,7 +395,7 @@ int physics_tick(
                         Chunk* chunk_top_right = chunk_ref_top.chunk->right; 
                         uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p); 
                         uint32_t p_index_top_right = chunk_append(chunk_top_right, p); 
-                        if (p_index_bottom_right < 0 || p_index_top_right < 0) {
+                        if (p_index_bottom_right == UINT32_MAX || p_index_top_right == UINT32_MAX) {
                             return -1; 
                         }
                         if (p->box.l > chunk_ref_bottom.chunk->box.r) { // left edge crossed right 
@@ -338,7 +423,7 @@ int physics_tick(
                         Chunk* chunk_bottom_left = chunk_ref_bottom.chunk->left;
                         uint32_t p_index_bottom_left = chunk_append(chunk_ref_bottom.chunk->left, p); 
                         uint32_t p_index_top_left = chunk_append(chunk_ref_top.chunk->left, p); 
-                        if (p_index_bottom_left < 0 || p_index_top_left < 0) {
+                        if (p_index_bottom_left == UINT32_MAX|| p_index_top_left == UINT32_MAX) {
                             return -1; 
                         }
                         if (p->box.r < chunk_ref_bottom.chunk->box.l) { // right edge crossed left 
@@ -391,7 +476,7 @@ int physics_tick(
                         Chunk* chunk_top_right = chunk_ref_right.chunk->top; 
                         uint32_t p_index_top_left = chunk_append(chunk_top_left, p); 
                         uint32_t p_index_top_right = chunk_append(chunk_top_right, p); 
-                        if (p_index_top_left < 0 || p_index_top_right < 0) {
+                        if (p_index_top_left == UINT32_MAX || p_index_top_right == UINT32_MAX) {
                             return -1; 
                         }
                         if (p->box.b > chunk_ref_left.chunk->box.t) { // bottom edge crossed top 
@@ -419,7 +504,7 @@ int physics_tick(
                         Chunk* chunk_bottom_right = chunk_ref_right.chunk->bottom; 
                         uint32_t p_index_bottom_left = chunk_append(chunk_bottom_left, p); 
                         uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p); 
-                        if (p_index_bottom_left < 0 || p_index_bottom_right < 0) {
+                        if (p_index_bottom_left == UINT32_MAX || p_index_bottom_right == UINT32_MAX) {
                             return -1; 
                         }
                         if (p->box.t < chunk_ref_left.chunk->box.b) { // top edge crossed bottom  
@@ -659,7 +744,7 @@ int setup_particles(
                     switch (p->chunk_state) {
                         case INVALID: {
                             uint32_t p_index = chunk_append(chunk, p);
-                            if (p_index < 0) {
+                            if (p_index == UINT32_MAX) {
                                 fprintf(stderr, "ERROR: chunk_append failed.\n");
                                 return -1; 
                             }
@@ -669,7 +754,7 @@ int setup_particles(
                         case ONE: {
                               if (p->chunk_ref[0].chunk->right == chunk) { // the way we iterate, we only have to check if its a chunk to the right  
                                     uint32_t p_index = chunk_append(chunk, p);
-                                    if (p_index < 0) {
+                                    if (p_index == UINT32_MAX) {
                                         fprintf(stderr, "ERROR: chunk_append failed.\n");
                                         return -1; 
                                     }
@@ -677,7 +762,7 @@ int setup_particles(
                                     particle_update_chunk_ref(p, 1, chunk, p_index); 
                               } else if (p->chunk_ref[0].chunk->top == chunk) {
                                     uint32_t p_index = chunk_append(chunk, p);
-                                    if (p_index < 0) {
+                                    if (p_index == UINT32_MAX) {
                                         fprintf(stderr, "ERROR: chunk_append failed.\n");
                                         return -1; 
                                     }
@@ -691,7 +776,7 @@ int setup_particles(
                             Chunk* chunk_bottom_right = p->chunk_ref[3].chunk->right; 
                             uint32_t p_index_top_right = chunk_append(chunk_top_right, p);
                             uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p);
-                            if (p_index_top_right < 0 || p_index_bottom_right < 0) {
+                            if (p_index_top_right == UINT32_MAX || p_index_bottom_right == UINT32_MAX) {
                                 fprintf(stderr, "ERROR: chunk_append failed.\n");
                                 return -1; 
                             }
@@ -709,7 +794,7 @@ int setup_particles(
                             uint32_t p_index_bottom_left = p->chunk_ref[0].p_index; 
                             uint32_t p_index_top_left = chunk_append(chunk_top_left, p);
                             uint32_t p_index_top_right = chunk_append(chunk_top_right, p);
-                            if (p_index_top_left < 0 || p_index_top_right < 0) {
+                            if (p_index_top_left == UINT32_MAX || p_index_top_right == UINT32_MAX) {
                                 fprintf(stderr, "ERROR: chunk_append failed.\n");
                                 return -1; 
                             }
@@ -928,33 +1013,15 @@ int main(int argc, char* argv[]) {
     SDL_ReleaseGPUShader(device, shader_vert_debug); 
     SDL_ReleaseGPUShader(device, shader_frag_debug); 
 
+    // ---- [START] vulkan particle setup ----
+    SDL_GPUBuffer* vertex_buffer = NULL; 
+    SDL_GPUBuffer* index_buffer = NULL; 
+    SDL_GPUTransferBuffer* transfer_buffer = NULL; 
+    PositionTextureVertex* transfer_data = NULL; 
+
     uint32_t n_vertices = 4; 
     uint32_t n_indices  = 6; 
-    SDL_GPUBuffer* vertex_buffer = SDL_CreateGPUBuffer(
-        device, 
-        &(SDL_GPUBufferCreateInfo) {
-            .usage = SDL_GPU_BUFFERUSAGE_VERTEX, 
-            .size = sizeof(PositionTextureVertex) * n_vertices
-        }
-    ); 
-
-    SDL_GPUBuffer* index_buffer = SDL_CreateGPUBuffer(
-        device, 
-        &(SDL_GPUBufferCreateInfo) {
-            .usage = SDL_GPU_BUFFERUSAGE_INDEX, 
-            .size = sizeof(Uint16) * n_indices 
-        }
-    ); 
-
-    SDL_GPUTransferBuffer* transfer_buffer = SDL_CreateGPUTransferBuffer(
-        device,
-        &(SDL_GPUTransferBufferCreateInfo) {
-            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = (sizeof(PositionTextureVertex) * n_vertices) + (sizeof(Uint16) * n_indices)
-        }
-    );
-
-    PositionTextureVertex* transfer_data = SDL_MapGPUTransferBuffer(device, transfer_buffer, false);
+    vulkan_buffers_create(device, &vertex_buffer, sizeof(PositionTextureVertex), n_vertices, &index_buffer, n_indices, &transfer_buffer, (void**)&transfer_data);
     
     transfer_data[0] = (PositionTextureVertex) { 
          -1.0f,  1.0f,  0.0f, 
@@ -1004,39 +1071,7 @@ int main(int argc, char* argv[]) {
     index_data[4] = 0;
     index_data[5] = 3;
 
-    SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
-
-    SDL_GPUCommandBuffer* upload_cmdbuf = SDL_AcquireGPUCommandBuffer(device);
-    SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(upload_cmdbuf);
-    SDL_UploadToGPUBuffer(
-        copy_pass,
-        &(SDL_GPUTransferBufferLocation) {
-            .transfer_buffer = transfer_buffer,
-            .offset = 0
-        },
-        &(SDL_GPUBufferRegion) {
-            .buffer = vertex_buffer,
-            .offset = 0,
-            .size = sizeof(PositionTextureVertex) * n_vertices 
-        },
-        false
-    );
-    SDL_UploadToGPUBuffer(
-        copy_pass,
-        &(SDL_GPUTransferBufferLocation) {
-            .transfer_buffer = transfer_buffer,
-            .offset = sizeof(PositionTextureVertex) * n_vertices
-        },
-        &(SDL_GPUBufferRegion) {
-            .buffer = index_buffer,
-            .offset = 0,
-            .size = sizeof(Uint16) * n_indices
-        },
-        false
-    );
-    SDL_EndGPUCopyPass(copy_pass);
-    SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
-    SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
+    vulkan_buffers_upload(device, vertex_buffer, sizeof(PositionTextureVertex), n_vertices, index_buffer, n_indices, transfer_buffer);
 
     uint32_t n_particles = N; // Depends on the GPU i guess, I have 8GB VRAM so 1 million should be fine 
     SDL_GPUBuffer* live_data_buffer = SDL_CreateGPUBuffer(
@@ -1054,16 +1089,65 @@ int main(int argc, char* argv[]) {
             .size = n_particles * sizeof(GPUParticle)
         }
     );
+    // ---- [END] vulkan particle setup ----
 
+    // ---- [START] vulkan debug setup ----
+    SDL_GPUBuffer* vertex_buffer_debug = NULL; 
+    SDL_GPUBuffer* index_buffer_debug = NULL; 
+    SDL_GPUTransferBuffer* transfer_buffer_debug = NULL; 
+    Vec2Vertex* transfer_data_debug = NULL; 
+
+    uint32_t n_vertices_debug = 4; 
+    uint32_t n_indices_debug  = 6; 
+    vulkan_buffers_create(device, &vertex_buffer_debug, sizeof(Vec2Vertex), n_vertices_debug, &index_buffer_debug, n_indices_debug, &transfer_buffer_debug, (void**)&transfer_data_debug);
+    
+    transfer_data_debug[0] = (Vec2Vertex) { 
+         -1.0f,  1.0f 
+    };
+    transfer_data_debug[1] = (Vec2Vertex) {  
+        1.0f,  1.0f
+    };
+    transfer_data_debug[2] = (Vec2Vertex) {  
+         1.0f, -1.0f
+    };
+    transfer_data_debug[3] = (Vec2Vertex) { 
+        -1.0f, -1.0f
+    };
+
+    /* Container container = { */ 
+    /*     .width = WINDOW_WIDTH, */ 
+    /*     .height = WINDOW_HEIGHT, */ 
+    /*     .zoom = 1/500.0f */ 
+    /* }; */ 
+
+    /* container.inverse_aspect_ratio = (float) container.height/container.width; */ 
+    /* container.scalar = container.inverse_aspect_ratio * container.zoom; */ 
+    /* float particle_radius = R; */ 
+    /* for (int i = 0; i < n_vertices; i++) { */
+    /*     transfer_data[i].x *= container.inverse_aspect_ratio; */   
+    /*     transfer_data[i].x *= particle_radius*container.zoom; */  
+    /*     transfer_data[i].y *= particle_radius*container.zoom; */  
+    /* } */
+
+    Uint16* index_data_debug = (Uint16*) &transfer_data_debug[n_vertices_debug];
+    index_data_debug[0] = 2;
+    index_data_debug[1] = 1;
+    index_data_debug[2] = 0;
+    index_data_debug[3] = 2;
+    index_data_debug[4] = 0;
+    index_data_debug[5] = 3;
+
+    vulkan_buffers_upload(device, vertex_buffer_debug, sizeof(Vec2Vertex), n_vertices_debug, index_buffer_debug, n_indices_debug, transfer_buffer_debug);
+    // ---- [END] vulkan debug setup ----
 
     // 
-    // ----  Vulkan setup done  -----
+    // ---- [END] vulkan setup -----
     // 
 
     SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
-    uint32_t viewport_width      = WINDOW_WIDTH; 
-    uint32_t viewport_height     = WINDOW_HEIGHT; 
+    uint32_t viewport_width  = WINDOW_WIDTH; 
+    uint32_t viewport_height = WINDOW_HEIGHT; 
     float viewport_min_depth = 0.1f; 
     float viewport_max_depth = 1.0f; 
     SDL_GPUViewport small_viewport = (SDL_GPUViewport) { 
@@ -1075,7 +1159,7 @@ int main(int argc, char* argv[]) {
     // Setup simulation 
     void* mem_block = NULL; 
 
-    ChunkmapInfo chunkmap_info = (ChunkmapInfo) {.n = (Vec2i) {.x = 10, .y = 8}, .size = (Vec2f) { .x = 0.0f, .y = 0.0f }};
+    ChunkmapInfo chunkmap_info = (ChunkmapInfo) {.n = (Vec2i) {.x = 20, .y = 16}, .size = (Vec2f) { .x = 0.0f, .y = 0.0f }};
     chunkmap_info.size.x = (float) container.width / chunkmap_info.n.x; 
     chunkmap_info.size.y = (float) container.height / chunkmap_info.n.y; 
     Chunk*** chunkmap = NULL;
@@ -1090,7 +1174,7 @@ int main(int argc, char* argv[]) {
 
     printf("initializing memory...\n");
     if (setup_simulation_memory(&mem_block, &chunkmap, chunkmap_info, &border_chunks, n_border_chunks, n_max_particles_per_chunk, &particles, n_particles) < 0) {
-        destroy_sdl(device, pipeline, debug_pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, window); 
         return 1; 
     }
     printf("memory initialized successfully!\n");
@@ -1098,7 +1182,7 @@ int main(int argc, char* argv[]) {
     if (setup_particles(chunkmap, chunkmap_info, particles, n_particles, particle_radius, &container) < 0) {
         fprintf(stderr, "ERROR: sim setup failed.\n");
         free(mem_block);
-        destroy_sdl(device, pipeline, debug_pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, window); 
         return 1; 
     }
     printf("%d particles initialized!\n", n_particles);
@@ -1237,7 +1321,7 @@ int main(int argc, char* argv[]) {
     }
     
     free(mem_block);
-    destroy_sdl(device, pipeline, debug_pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, window); 
+    destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, window); 
     return 0; 
 }
 
