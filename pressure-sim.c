@@ -17,12 +17,13 @@
             collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
         }                                                                                    \
     } while(0);                                                                              \
-    (void);                                                                                  \
 })
 
 #define particle_update_chunk_ref(_p, _i, _chunk, _p_index) ({ \
-    (_p)->chunk_ref[(_i)].chunk = (_chunk);                    \
-    (_p)->chunk_ref[(_i)].p_index = (_p_index);                \
+    do {                                                       \
+        (_p)->chunk_ref[(_i)].chunk = (_chunk);                \
+        (_p)->chunk_ref[(_i)].p_index = (_p_index);            \
+    } while(0);                                                \
 }) 
 
 #define chunk_append(_chunk, _p) ({                                            \
@@ -36,21 +37,21 @@
         (_chunk)->particles[_p_index] = (_p);                                  \
         (_chunk)->n_filled++;                                                  \
         (_chunk)->n_free--;                                                    \
-        /* printf("chunk_append (%d,%d)  n_filled=%d,n_free=%d,p->chunk_state=%d\n", (_chunk)->xy.x, (_chunk)->xy.y, (_chunk)->n_filled, (_chunk)->n_free, (_p)->chunk_state); */ \
     } while(0);                                                                \
     _p_index;                                                                  \
 })
 
-#define chunk_pop(_chunk_ref) ({                                                                                           \
-    if ((_chunk_ref)->chunk->n_filled == 0) {                                                                              \
-        fprintf(stderr, "ERROR: popping from empty chunk.\n");                                                             \
-        abort();                                                                                                           \
-    }                                                                                                                      \
-    (_chunk_ref)->chunk->n_filled--;                                                                                       \
-    (_chunk_ref)->chunk->particles[(_chunk_ref)->p_index] = (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled]; \
-    (_chunk_ref)->chunk->n_free++;                                                                                         \
-    /* printf("chunk_pop (%d,%d)  n_filled=%d,n_free=%d,p->chunk_state=%d\n", (_chunk_ref)->chunk->xy.x, (_chunk_ref)->chunk->xy.y, (_chunk_ref)->chunk->n_filled, (_chunk_ref)->chunk->n_free, (_chunk_ref)->chunk->particles[(_chunk_ref)->p_index]->chunk_state); */                                                                        \
-    (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled] = NULL;                                                  \
+#define chunk_pop(_chunk_ref) ({                                                                                               \
+    do {                                                                                                                       \
+        if ((_chunk_ref)->chunk->n_filled == 0) {                                                                              \
+            fprintf(stderr, "ERROR: popping from empty chunk.\n");                                                             \
+            abort();                                                                                                           \
+        }                                                                                                                      \
+        (_chunk_ref)->chunk->n_filled--;                                                                                       \
+        (_chunk_ref)->chunk->particles[(_chunk_ref)->p_index] = (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled]; \
+        (_chunk_ref)->chunk->n_free++;                                                                                         \
+        (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled] = NULL;                                                  \
+    } while(0);                                                                                                                \
 })
 
 #define box_overlap(_b1, _b2) ((_b1).r >= (_b2).l && (_b1).l <= (_b2).r && (_b1).t >= (_b2).b && (_b1).b <= (_b2).t) 
