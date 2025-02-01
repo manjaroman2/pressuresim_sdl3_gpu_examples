@@ -8,13 +8,16 @@
 
 #define vec2_unpack(_vec) ((_vec).x), ((_vec).y)
 
-#define particle_collisions(_p, _chunk_ref) ({                                           \
-    for (uint32_t j = 0; j < (_chunk_ref)->p_index; j++) {                               \
-        collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
-    }                                                                                    \
-    for (uint32_t j = (_chunk_ref)->p_index+1; j < (_chunk_ref)->chunk->n_filled; j++) { \
-        collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
-    }                                                                                    \
+#define particle_collisions(_p, _chunk_ref) ({                                               \
+    do {                                                                                     \
+        for (uint32_t j = 0; j < (_chunk_ref)->p_index; j++) {                               \
+            collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
+        }                                                                                    \
+        for (uint32_t j = (_chunk_ref)->p_index+1; j < (_chunk_ref)->chunk->n_filled; j++) { \
+            collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
+        }                                                                                    \
+    } while(0);                                                                              \
+    (void);                                                                                  \
 })
 
 #define particle_update_chunk_ref(_p, _i, _chunk, _p_index) ({ \
