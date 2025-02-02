@@ -63,17 +63,16 @@
 #define WINDOW_HEIGHT 1000 
 
 
+// https://github.com/microsoft/DirectXShaderCompiler/wiki/Buffer-Packing
+// https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-packing-rules
+// https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst#constant-texture-structured-byte-buffers
 typedef struct GPULine {
     float x, y;    // 8 bytes  
 } GPULine; 
 
 
 typedef struct GPUParticle {
-    float x, y, z; // gpu coords 
-    float padding; // vulkan needs 16 byte alignment. maybe theres a fix to this, seems wasteful 
-                   // https://github.com/microsoft/DirectXShaderCompiler/wiki/Buffer-Packing
-                   // https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-packing-rules
-                   // https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst#constant-texture-structured-byte-buffers
+    float x, y; // gpu coords 8 bytes 
 } GPUParticle; 
 
 
@@ -741,7 +740,7 @@ int setup_particles(
 
         p->gpu.x = -1.0f + p->x * container->scalar; 
         p->gpu.y = -1.0f + p->y * container->zoom;
-        p->gpu.z = 0.0f; 
+        /* p->gpu.z = 0.0f; */ 
 
         p->vx = rand_float(-v_start, v_start); 
         p->vy = rand_float(-v_start, v_start); 
@@ -1262,7 +1261,7 @@ int main(int argc, char* argv[]) {
         for (uint32_t i = 0; i < n_particles; i+=1) {
             live_data[i].x = particles[i].gpu.x;
             live_data[i].y = particles[i].gpu.y;
-            live_data[i].z = particles[i].gpu.z; 
+            /* live_data[i].z = particles[i].gpu.z; */ 
         }
         SDL_UnmapGPUTransferBuffer(device, live_data_transfer_buffer); 
         SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmdbuf);

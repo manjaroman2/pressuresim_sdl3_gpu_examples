@@ -1,5 +1,5 @@
 struct Particle { 
-    float3 Position; 
+    float2 Position; 
 };
 
 StructuredBuffer<Particle> ParticleDataBuffer: register(t0, space0);
