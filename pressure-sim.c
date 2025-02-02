@@ -1,10 +1,11 @@
 #include "pressure-sim-utils.h"
 
 #include <SDL3/SDL_gpu.h>
+#include <SDL3/SDL_vulkan.h>
 #include <stdint.h>
 #include <stdlib.h> 
 #include <stdio.h> 
-#include <string.h>
+#include <vulkan/vulkan_core.h>
 
 #define vec2_unpack(_vec) ((_vec).x), ((_vec).y)
 
@@ -62,9 +63,17 @@
 #define WINDOW_HEIGHT 1000 
 
 
+typedef struct GPULine {
+    float x, y;    // 8 bytes  
+} GPULine; 
+
+
 typedef struct GPUParticle {
     float x, y, z; // gpu coords 
     float padding; // vulkan needs 16 byte alignment. maybe theres a fix to this, seems wasteful 
+                   // https://github.com/microsoft/DirectXShaderCompiler/wiki/Buffer-Packing
+                   // https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-packing-rules
+                   // https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst#constant-texture-structured-byte-buffers
 } GPUParticle; 
 
 
@@ -222,11 +231,15 @@ void destroy_sdl(
     SDL_GPUGraphicsPipeline* debug_pipeline, 
     SDL_GPUBuffer* vertex_buffer_debug, 
     SDL_GPUBuffer* index_buffer_debug, 
+    SDL_GPUTransferBuffer* live_data_transfer_buffer_debug, 
+    SDL_GPUBuffer* live_data_buffer_debug, 
     SDL_Window* window) {
 
     SDL_ReleaseGPUGraphicsPipeline(device, debug_pipeline);
     SDL_ReleaseGPUBuffer(device, vertex_buffer_debug); 
     SDL_ReleaseGPUBuffer(device, index_buffer_debug); 
+    SDL_ReleaseGPUTransferBuffer(device, live_data_transfer_buffer_debug); 
+    SDL_ReleaseGPUBuffer(device, live_data_buffer_debug); 
 
     SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
     SDL_ReleaseGPUBuffer(device, vertex_buffer); 
@@ -832,6 +845,26 @@ int main(int argc, char* argv[]) {
         return 1;  
     }
 
+    /* VkInstance vk_instance; */ 
+    /* VkApplicationInfo vk_app_info = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "SDL Vulkan App"  }; */ 
+    /* VkInstanceCreateInfo vk_create_info = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &vk_app_info }; */ 
+    /* if (vkCreateInstance(&vk_create_info, NULL, &vk_instance) != VK_SUCCESS) { */
+    /*     fprintf(stderr, "ERROR: \n"); */
+    /*     return 1; */ 
+    /* } */
+    /* uint32_t gpuCount = 0; */
+    /* vkEnumeratePhysicalDevices(vk_instance, &gpuCount, NULL); */
+    /* VkPhysicalDevice physicalDevices[gpuCount]; */
+    /* vkEnumeratePhysicalDevices(vk_instance, &gpuCount, physicalDevices); */
+
+    /* VkPhysicalDevice physicalDevice = physicalDevices[0]; // Use the first GPU (or select based on criteria) */
+    /* VkPhysicalDeviceProperties deviceProperties; */
+    /* vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties); */
+
+    /* VkDeviceSize minAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment; */
+    /* printf("Minimum Storage Buffer Offset Alignment: %llu bytes\n", (unsigned long long)minAlignment); */
+    /* return 1; */ 
+
     SDL_GPUDevice* device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL, true, NULL); 
     if (device == NULL) {
         fprintf(stderr, "ERROR: SDL_CreateGPUDevice failed: %s\n", SDL_GetError());
@@ -974,7 +1007,7 @@ int main(int argc, char* argv[]) {
             },  
             .num_vertex_attributes = 1
         },
-        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST,
         .rasterizer_state = (SDL_GPURasterizerState){
             .cull_mode = SDL_GPU_CULLMODE_NONE,
             .fill_mode = SDL_GPU_FILLMODE_LINE,
@@ -1096,38 +1129,45 @@ int main(int argc, char* argv[]) {
     Vec2Vertex* transfer_data_debug = NULL; 
 
     uint32_t n_vertices_debug = 4; 
-    uint32_t n_indices_debug  = 6; 
+    uint32_t n_indices_debug  = 4; 
     vulkan_buffers_create(device, &vertex_buffer_debug, sizeof(Vec2Vertex), n_vertices_debug, &index_buffer_debug, n_indices_debug, &transfer_buffer_debug, (void**)&transfer_data_debug);
-    
-    transfer_data_debug[0] = (Vec2Vertex) { -1.0f,  1.0f };
-    transfer_data_debug[1] = (Vec2Vertex) {  1.0f,  1.0f };
-    transfer_data_debug[2] = (Vec2Vertex) {  1.0f, -1.0f };
-    transfer_data_debug[3] = (Vec2Vertex) { -1.0f, -1.0f };
 
-    /* Container container = { */ 
-    /*     .width = WINDOW_WIDTH, */ 
-    /*     .height = WINDOW_HEIGHT, */ 
-    /*     .zoom = 1/500.0f */ 
-    /* }; */ 
+    transfer_data_debug[0] = (Vec2Vertex) {  0.0f, -1.0f };
+    transfer_data_debug[1] = (Vec2Vertex) {  0.0f,  1.0f };
+    transfer_data_debug[2] = (Vec2Vertex) { -1.0f,  0.0f };
+    transfer_data_debug[3] = (Vec2Vertex) {  1.0f,  0.0f };
 
-    /* container.inverse_aspect_ratio = (float) container.height/container.width; */ 
-    /* container.scalar = container.inverse_aspect_ratio * container.zoom; */ 
-    /* float particle_radius = R; */ 
-    /* for (int i = 0; i < n_vertices; i++) { */
-    /*     transfer_data[i].x *= container.inverse_aspect_ratio; */   
-    /*     transfer_data[i].x *= particle_radius*container.zoom; */  
-    /*     transfer_data[i].y *= particle_radius*container.zoom; */  
-    /* } */
+    for (int i = 0; i < n_vertices_debug; i++) {
+        transfer_data_debug[i].x *= container.inverse_aspect_ratio;   
+        transfer_data_debug[i].x *= 100.0f*container.zoom;  
+        transfer_data_debug[i].y *= 100.0f*container.zoom;  
+    }
 
     Uint16* index_data_debug = (Uint16*) &transfer_data_debug[n_vertices_debug];
-    index_data_debug[0] = 2;
+    index_data_debug[0] = 0;
     index_data_debug[1] = 1;
-    index_data_debug[2] = 0;
-    index_data_debug[3] = 2;
-    index_data_debug[4] = 0;
-    index_data_debug[5] = 3;
+    index_data_debug[2] = 2;
+    index_data_debug[3] = 3;
 
     vulkan_buffers_upload(device, vertex_buffer_debug, sizeof(Vec2Vertex), n_vertices_debug, index_buffer_debug, n_indices_debug, transfer_buffer_debug);
+
+    uint32_t n_lines = 10; 
+    SDL_GPUBuffer* live_data_buffer_debug = SDL_CreateGPUBuffer(
+        device,
+        &(SDL_GPUBufferCreateInfo) {
+            .usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
+            .size = n_lines * sizeof(GPULine)
+        }
+    );
+
+    SDL_GPUTransferBuffer* live_data_transfer_buffer_debug = SDL_CreateGPUTransferBuffer(
+        device,
+        &(SDL_GPUTransferBufferCreateInfo) {
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = n_lines * sizeof(GPULine)
+        }
+    );
+
     // ---- [END] vulkan debug setup ----
 
     // 
@@ -1164,7 +1204,7 @@ int main(int argc, char* argv[]) {
 
     printf("initializing memory...\n");
     if (setup_simulation_memory(&mem_block, &chunkmap, chunkmap_info, &border_chunks, n_border_chunks, n_max_particles_per_chunk, &particles, n_particles) < 0) {
-        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, window); 
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, live_data_transfer_buffer_debug, live_data_buffer_debug, window); 
         return 1; 
     }
     printf("memory initialized successfully!\n");
@@ -1172,7 +1212,7 @@ int main(int argc, char* argv[]) {
     if (setup_particles(chunkmap, chunkmap_info, particles, n_particles, particle_radius, &container) < 0) {
         fprintf(stderr, "ERROR: sim setup failed.\n");
         free(mem_block);
-        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, window); 
+        destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, live_data_transfer_buffer_debug, live_data_buffer_debug, window); 
         return 1; 
     }
     printf("%d particles initialized!\n", n_particles);
@@ -1212,20 +1252,19 @@ int main(int argc, char* argv[]) {
             }  
         }
 
+
+
         GPUParticle* live_data = SDL_MapGPUTransferBuffer(
             device,
             live_data_transfer_buffer,
             true
         );
-
-        // Write to live_data here! 
         for (uint32_t i = 0; i < n_particles; i+=1) {
             live_data[i].x = particles[i].gpu.x;
             live_data[i].y = particles[i].gpu.y;
             live_data[i].z = particles[i].gpu.z; 
         }
         SDL_UnmapGPUTransferBuffer(device, live_data_transfer_buffer); 
-
         SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(cmdbuf);
         SDL_UploadToGPUBuffer(
             copy_pass,
@@ -1241,6 +1280,37 @@ int main(int argc, char* argv[]) {
             false   
         );
         SDL_EndGPUCopyPass(copy_pass);
+
+
+
+        GPULine* live_data_debug = SDL_MapGPUTransferBuffer(
+            device,
+            live_data_transfer_buffer_debug,
+            true
+        );
+        for (uint32_t i = 0; i < n_lines; i+=1) {
+            live_data_debug[i].x = 0.1f * i;  
+            live_data_debug[i].y = 0.0f; 
+        }
+        SDL_UnmapGPUTransferBuffer(device, live_data_transfer_buffer_debug); 
+
+        SDL_GPUCopyPass* copy_pass_debug = SDL_BeginGPUCopyPass(cmdbuf);
+        SDL_UploadToGPUBuffer(
+            copy_pass_debug,
+            &(SDL_GPUTransferBufferLocation) {
+                .transfer_buffer = live_data_transfer_buffer_debug,
+                .offset = 0
+            },
+            &(SDL_GPUBufferRegion) {
+                .buffer = live_data_buffer_debug,
+                .offset = 0,
+                .size = sizeof(GPULine) * n_lines 
+            },
+            false   
+        );
+        SDL_EndGPUCopyPass(copy_pass_debug);
+
+
 
         SDL_GPUColorTargetInfo color_target_info = { 0 };
         color_target_info.texture     = swapchain_texture;
@@ -1278,6 +1348,7 @@ int main(int argc, char* argv[]) {
         );
         SDL_DrawGPUIndexedPrimitives(render_pass, n_indices, n_particles, 0, 0, 0);
 
+
         SDL_BindGPUGraphicsPipeline(render_pass, debug_pipeline);
         SDL_SetGPUViewport(render_pass, &small_viewport);
         SDL_BindGPUVertexBuffers(
@@ -1289,12 +1360,12 @@ int main(int argc, char* argv[]) {
             }, 
             1
         ); 
-        /* SDL_BindGPUVertexStorageBuffers( */
-        /*     render_pass, */
-        /*     0, */
-        /*     &live_data_buffer_debug, */
-        /*     1 */
-        /* ); */
+        SDL_BindGPUVertexStorageBuffers(
+            render_pass,
+            0,
+            &live_data_buffer_debug,
+            1
+        );
         SDL_BindGPUIndexBuffer(
             render_pass, 
             &(SDL_GPUBufferBinding) { 
@@ -1303,7 +1374,7 @@ int main(int argc, char* argv[]) {
             }, 
             SDL_GPU_INDEXELEMENTSIZE_16BIT
         );
-        SDL_DrawGPUIndexedPrimitives(render_pass, n_indices_debug, 1, 0, 0, 0);
+        SDL_DrawGPUIndexedPrimitives(render_pass, n_indices_debug, n_lines, 0, 0, 0);
 
         SDL_EndGPURenderPass(render_pass);
 
@@ -1311,7 +1382,7 @@ int main(int argc, char* argv[]) {
     }
     
     free(mem_block);
-    destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, window); 
+    destroy_sdl(device, pipeline, vertex_buffer, index_buffer, live_data_transfer_buffer, live_data_buffer, debug_pipeline, vertex_buffer_debug, index_buffer_debug, live_data_transfer_buffer_debug, live_data_buffer_debug, window); 
     return 0; 
 }
 

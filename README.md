@@ -16,6 +16,10 @@ You can now use `./compile-shaders.sh`, there is also 'libSDL3_shadercross', whi
 Use `./compile-and-run.sh <example>` to study an example.  
 e.g `./compile-and-run.sh basic-triangle`  
 
+Custom dxc compilation:   
+To compile with for example: -fvk-use-scalar-layout, shadercross does not support that, therefore we need to compile, ourselves:   
+`linux_dxc/bin/dxc -T vs_6_0 -E main -spirv -fspv-target-env=vulkan1.0 -fvk-use-scalar-layout -O3 -Fo Line123.vert.spv shaders/source/Line.vert.hlsl`
+
 ### Todos
 
 * fix textured quad example 

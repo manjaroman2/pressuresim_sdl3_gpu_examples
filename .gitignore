@@ -2,3 +2,4 @@
 shaders/compiled
 build/*  
 *.log 
+linux_dxc/

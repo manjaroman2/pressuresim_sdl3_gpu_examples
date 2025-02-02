@@ -17,6 +17,6 @@ set -- \
     "SolidColor.frag" \
     "Circle.frag"
 for shader in "$@"; do
-    ./shadercross.bin "shaders/source/$shader.hlsl" -s HLSL -d SPIRV -o "shaders/compiled/$shader.spv"
+    ./shadercross.bin "shaders/source/$shader.hlsl" -s HLSL -d SPIRV -o "shaders/compiled/$shader.spv" -Dfvk-use-scalar-layout=true
 done
-tree "shaders/compiled"
+# tree "shaders/compiled"
