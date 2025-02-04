@@ -13,7 +13,11 @@ CC="clang"
 CFLAGS_RELEASE="-Oz -Werror -Wall -pedantic -Wno-gnu-statement-expression-from-macro-expansion" #
 LINKFLAGS_RELEASE="-lSDL3 -g -s"
 CFLAGS_DEBUG="-ggdb -O2 -Werror -Wall -pedantic -Wno-gnu-statement-expression-from-macro-expansion -Wno-unused-variable" #
-LINKFLAGS_DEBUG="-lSDL3 -lvulkan -g"
+LINKFLAGS_DEBUG="-I/usr/local/include -L/usr/local/lib -lSDL3 -lvulkan -g"
+# export LD_LIBRARY_PATH=~/src/SDL/build:$LD_LIBRARY_PATH
+# export C_INCLUDE_PATH=~/src/SDL/include:$C_INCLUDE_PATH
+# export PKG_CONFIG_PATH=~/src/SDL/build:$PKG_CONFIG_PATH
+pkg-config --modversion sdl3
 CFLAGS=$CFLAGS_DEBUG
 LINKFLAGS=$LINKFLAGS_DEBUG
 # CFLAGS=$CFLAGS_RELEASE
