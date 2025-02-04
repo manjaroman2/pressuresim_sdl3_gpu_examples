@@ -897,24 +897,24 @@ int main(int argc, char* argv[]) {
     // ----  Vulkan setup ---- 
     //
 
-	SDL_GPUTextureFormat depth_stencil_format;
+    SDL_GPUTextureFormat depth_stencil_format;
 
-	if (SDL_GPUTextureSupportsFormat(
-			device, 
-			SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,
-			SDL_GPU_TEXTURETYPE_2D,
-			SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
-		depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
-	} else if (SDL_GPUTextureSupportsFormat(
-			device,
-			SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
-			SDL_GPU_TEXTURETYPE_2D,
-			SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
-		depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
-	} else {
-		fprintf(stderr, "ERROR: Stencil formats not supported!\n");
-		return -1;
-	}
+    if (SDL_GPUTextureSupportsFormat(
+            device, 
+            SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT,
+            SDL_GPU_TEXTURETYPE_2D,
+            SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
+        depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D24_UNORM_S8_UINT;
+    } else if (SDL_GPUTextureSupportsFormat(
+            device,
+            SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT,
+            SDL_GPU_TEXTURETYPE_2D,
+            SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)) {
+        depth_stencil_format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT_S8_UINT;
+    } else {
+        fprintf(stderr, "ERROR: Stencil formats not supported!\n");
+        return -1;
+    }
 
     SDL_GPUShader* particles_shader_vert = load_shader(device, "shaders/compiled/Circle.vert.spv", SDL_GPU_SHADERSTAGE_VERTEX, 0, 0, 1, 0); 
     if (particles_shader_vert == NULL) {
@@ -1048,23 +1048,23 @@ int main(int argc, char* argv[]) {
             .fill_mode = SDL_GPU_FILLMODE_LINE,
             .front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE
         },
-		/* .depth_stencil_state = (SDL_GPUDepthStencilState){ */
-		/* 	.front_stencil_state = (SDL_GPUStencilOpState){ */
-		/* 		.compare_op = SDL_GPU_COMPAREOP_NEVER, */
-		/* 		.fail_op = SDL_GPU_STENCILOP_REPLACE, */
-		/* 		.pass_op = SDL_GPU_STENCILOP_KEEP, */
-		/* 		.depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
-		/* 	}, */
-		/* 	.back_stencil_state = (SDL_GPUStencilOpState){ */
-		/* 		.compare_op = SDL_GPU_COMPAREOP_NEVER, */
-		/* 		.fail_op = SDL_GPU_STENCILOP_REPLACE, */
-		/* 		.pass_op = SDL_GPU_STENCILOP_KEEP, */
-		/* 		.depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
-		/* 	}, */
-		/* 	.compare_op = SDL_GPU_COMPAREOP_NEVER, */ 
-		/* 	.write_mask = 0xFF, */
-		/* 	.enable_depth_test = true, */
-		/* }, */
+        /* .depth_stencil_state = (SDL_GPUDepthStencilState){ */
+        /*  .front_stencil_state = (SDL_GPUStencilOpState){ */
+        /*      .compare_op = SDL_GPU_COMPAREOP_NEVER, */
+        /*      .fail_op = SDL_GPU_STENCILOP_REPLACE, */
+        /*      .pass_op = SDL_GPU_STENCILOP_KEEP, */
+        /*      .depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
+        /*  }, */
+        /*  .back_stencil_state = (SDL_GPUStencilOpState){ */
+        /*      .compare_op = SDL_GPU_COMPAREOP_NEVER, */
+        /*      .fail_op = SDL_GPU_STENCILOP_REPLACE, */
+        /*      .pass_op = SDL_GPU_STENCILOP_KEEP, */
+        /*      .depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
+        /*  }, */
+        /*  .compare_op = SDL_GPU_COMPAREOP_NEVER, */ 
+        /*  .write_mask = 0xFF, */
+        /*  .enable_depth_test = true, */
+        /* }, */
         .target_info = {
             .color_target_descriptions = (SDL_GPUColorTargetDescription[]){
                 {
@@ -1085,8 +1085,8 @@ int main(int argc, char* argv[]) {
                 }
             },
             .num_color_targets = 1,
-			/* .depth_stencil_format = depth_stencil_format, */ 
-			/* .has_depth_stencil_target = true */
+            /* .depth_stencil_format = depth_stencil_format, */ 
+            /* .has_depth_stencil_target = true */
         },
     };  
 
@@ -1096,46 +1096,46 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-	/* debug_lines_pipeline_info.depth_stencil_state = (SDL_GPUDepthStencilState){ */
-	/* 	.enable_stencil_test = true, */
-	/* 	.front_stencil_state = (SDL_GPUStencilOpState){ */
-	/* 		.compare_op = SDL_GPU_COMPAREOP_EQUAL, */
-	/* 		.fail_op = SDL_GPU_STENCILOP_KEEP, */
-	/* 		.pass_op = SDL_GPU_STENCILOP_KEEP, */
-	/* 		.depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
-	/* 	}, */
-	/* 	.back_stencil_state = (SDL_GPUStencilOpState){ */
-	/* 		.compare_op = SDL_GPU_COMPAREOP_NEVER, */
-	/* 		.fail_op = SDL_GPU_STENCILOP_KEEP, */
-	/* 		.pass_op = SDL_GPU_STENCILOP_KEEP, */
-	/* 		.depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
-	/* 	}, */
-	/* 	.compare_mask = 0xFF, */
-	/* 	.write_mask = 0 */
-	/* }; */
-	SDL_GPUGraphicsPipeline* debug_pipeline_maskee = SDL_CreateGPUGraphicsPipeline(device, &debug_lines_pipeline_info);
-	if (debug_pipeline_maskee == NULL)
-	{
-		fprintf(stderr, "Failed to create maskee pipeline!\n");
-		return -1;
-	}
+    /* debug_lines_pipeline_info.depth_stencil_state = (SDL_GPUDepthStencilState){ */
+    /*  .enable_stencil_test = true, */
+    /*  .front_stencil_state = (SDL_GPUStencilOpState){ */
+    /*      .compare_op = SDL_GPU_COMPAREOP_EQUAL, */
+    /*      .fail_op = SDL_GPU_STENCILOP_KEEP, */
+    /*      .pass_op = SDL_GPU_STENCILOP_KEEP, */
+    /*      .depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
+    /*  }, */
+    /*  .back_stencil_state = (SDL_GPUStencilOpState){ */
+    /*      .compare_op = SDL_GPU_COMPAREOP_NEVER, */
+    /*      .fail_op = SDL_GPU_STENCILOP_KEEP, */
+    /*      .pass_op = SDL_GPU_STENCILOP_KEEP, */
+    /*      .depth_fail_op = SDL_GPU_STENCILOP_KEEP, */
+    /*  }, */
+    /*  .compare_mask = 0xFF, */
+    /*  .write_mask = 0 */
+    /* }; */
+    SDL_GPUGraphicsPipeline* debug_pipeline_maskee = SDL_CreateGPUGraphicsPipeline(device, &debug_lines_pipeline_info);
+    if (debug_pipeline_maskee == NULL)
+    {
+        fprintf(stderr, "Failed to create maskee pipeline!\n");
+        return -1;
+    }
 
     SDL_ReleaseGPUShader(device, debug_lines_shader_vert); 
     SDL_ReleaseGPUShader(device, debug_lines_shader_frag); 
 
-	SDL_GPUTexture* texture_depth_stencil = SDL_CreateGPUTexture(
-		device,
-		&(SDL_GPUTextureCreateInfo) {
-			.type = SDL_GPU_TEXTURETYPE_2D,
-			.width = WINDOW_WIDTH,
-			.height = WINDOW_WIDTH,
-			.layer_count_or_depth = 1,
-			.num_levels = 1,
-			.sample_count = SDL_GPU_SAMPLECOUNT_1,
-			.format = depth_stencil_format,
-			.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET
-		}
-	);
+    SDL_GPUTexture* texture_depth_stencil = SDL_CreateGPUTexture(
+        device,
+        &(SDL_GPUTextureCreateInfo) {
+            .type = SDL_GPU_TEXTURETYPE_2D,
+            .width = WINDOW_WIDTH,
+            .height = WINDOW_WIDTH,
+            .layer_count_or_depth = 1,
+            .num_levels = 1,
+            .sample_count = SDL_GPU_SAMPLECOUNT_1,
+            .format = depth_stencil_format,
+            .usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET
+        }
+    );
 
     // ---- [START] vulkan particle setup ----
     SDL_GPUBuffer*          particles_vertex_buffer = NULL; 
@@ -1391,12 +1391,12 @@ int main(int argc, char* argv[]) {
         GPULine* debug_lines_data = SDL_MapGPUTransferBuffer(device, debug_lines_sso_transfer_buffer, true);
         for (uint32_t i = 0; i < chunkmap_info.n.x - 1; i+=1) { // vertical 
             debug_lines_data[i].x = 2 * (float)(i + 1) / (chunkmap_info.n.x); 
-			debug_lines_data[i].flags = 0; 
+            debug_lines_data[i].flags = 0; 
         }
         for (uint32_t i = chunkmap_info.n.x - 1; i < n_lines; i+=1) { // horizontal 
             uint32_t index = i - chunkmap_info.n.x + 1; 
             debug_lines_data[i].y = 2 * (float)(index + 1) / (chunkmap_info.n.y); 
-			debug_lines_data[i].flags = 1; 
+            debug_lines_data[i].flags = 1; 
         }
         SDL_UnmapGPUTransferBuffer(device, debug_lines_sso_transfer_buffer); 
         copy_pass = SDL_BeginGPUCopyPass(cmdbuf);
@@ -1422,15 +1422,15 @@ int main(int argc, char* argv[]) {
         color_target_info.store_op    = SDL_GPU_STOREOP_STORE;
         color_target_info.cycle       = false;
 
-		SDL_GPUDepthStencilTargetInfo depth_stencil_target_info = { 0 };
-		depth_stencil_target_info.texture           = texture_depth_stencil;
-		depth_stencil_target_info.clear_depth       = 0.0f;
-		depth_stencil_target_info.load_op           = SDL_GPU_LOADOP_CLEAR;
-		depth_stencil_target_info.store_op          = SDL_GPU_STOREOP_DONT_CARE;
-		depth_stencil_target_info.stencil_load_op   = SDL_GPU_LOADOP_CLEAR;
-		depth_stencil_target_info.stencil_store_op  = SDL_GPU_STOREOP_DONT_CARE;
-		depth_stencil_target_info.cycle             = true;
-		depth_stencil_target_info.clear_stencil     = 0;
+        SDL_GPUDepthStencilTargetInfo depth_stencil_target_info = { 0 };
+        depth_stencil_target_info.texture           = texture_depth_stencil;
+        depth_stencil_target_info.clear_depth       = 0.0f;
+        depth_stencil_target_info.load_op           = SDL_GPU_LOADOP_CLEAR;
+        depth_stencil_target_info.store_op          = SDL_GPU_STOREOP_DONT_CARE;
+        depth_stencil_target_info.stencil_load_op   = SDL_GPU_LOADOP_CLEAR;
+        depth_stencil_target_info.stencil_store_op  = SDL_GPU_STOREOP_DONT_CARE;
+        depth_stencil_target_info.cycle             = true;
+        depth_stencil_target_info.clear_stencil     = 0;
 
         SDL_GPURenderPass* render_pass = SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, NULL);  // , &depth_stencil_target_info);
 
@@ -1458,7 +1458,7 @@ int main(int argc, char* argv[]) {
             );
             SDL_DrawGPUIndexedPrimitives(render_pass, debug_lines_n_indices, n_lines, 0, 0, 0);
 
-			/* SDL_SetGPUStencilReference(render_pass, 0); */
+            /* SDL_SetGPUStencilReference(render_pass, 0); */
             /* SDL_BindGPUGraphicsPipeline(render_pass, pipeline_maskee); */
         }
 
