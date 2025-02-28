@@ -1,104 +1,24 @@
 #include "pressure-sim-utils.h"
-
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_gpu.h>
-#include <stdint.h>
+#include <SDL3/SDL_keycode.h>
 #include <stdlib.h> 
 #include <stdio.h> 
+#include <math.h> 
 
 #define vec2_unpack(_vec) ((_vec).x), ((_vec).y)
-
-
+#define box_unpack(_box) ((_box).l), ((_box).r), ((_box).t), ((_box).b)
 #define box_overlap(_b1, _b2) ((_b1).r >= (_b2).l && (_b1).l <= (_b2).r && (_b1).t >= (_b2).b && (_b1).b <= (_b2).t) 
+#define new_max(x,y) (((x) >= (y)) ? (x) : (y))
 
-#define N 50000
-#define R 2.0f 
+/* #define DEBUG 1 */ 
+
+#define N 20 
+#define R 35.0f 
+#define SPEED 1000
+#define DT 0.001f 
+#define CHUNK_X 10 
+#define CHUNK_Y 10
 #define WINDOW_WIDTH  1200
 #define WINDOW_HEIGHT 1000 
-
-
-// https://github.com/microsoft/DirectXShaderCompiler/wiki/Buffer-Packing
-// https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-packing-rules
-// https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst#constant-texture-structured-byte-buffers
-typedef struct {
-    float x, y;    // 8 bytes  
-    uint32_t flags; 
-    uint32_t _pad; 
-} GPULine; 
-
-
-typedef struct {
-    float x, y; // gpu coords 8 bytes 
-} GPUParticle; 
-
-
-typedef struct {
-    float l, r, b, t; 
-} Box; 
-
-
-typedef struct {
-    uint32_t x, y; 
-} Vec2i; 
-
-
-typedef struct {
-    float x; 
-    float y; 
-} Vec2f; 
-
-
-typedef struct {
-    float x, y, z; 
-} Vec3f; 
-
-
-typedef struct {
-    Vec2i n; 
-    Vec2f size; 
-} ChunkmapInfo; 
-
-
-typedef struct Particle Particle; 
-
-
-typedef struct Chunk {
-    Particle** particles; 
-    struct Chunk* left; 
-    struct Chunk* right; 
-    struct Chunk* bottom; 
-    struct Chunk* top; 
-    Box box;
-    uint32_t n_filled; 
-    uint32_t n_free; 
-    Vec2i xy; 
-} Chunk; 
-
-
-typedef struct {
-    Chunk* chunk;
-    uint32_t p_index; // particle index in chunk 
-} ChunkRef; 
-
-
-typedef enum { 
-    INVALID, 
-    ONE,
-    TOP_BOTTOM,
-    LEFT_RIGHT,
-    LRTB
-} ChunkState;
-
-
-struct Particle {
-    ChunkRef chunk_ref[4]; 
-    ChunkState chunk_state; 
-    GPUParticle gpu;
-    Box box; 
-    Vec2f p; 
-    Vec2f v; 
-    float m; 
-}; 
 
 
 typedef struct {
@@ -113,26 +33,579 @@ typedef struct {
     SDL_GPUBuffer* index_buffer;
     SDL_GPUBuffer* sso_buffer; 
     SDL_GPUTransferBuffer* sso_transfer_buffer;
-} Destroyer;
+} Pipeline_Bomber;
+
+// https://github.com/microsoft/DirectXShaderCompiler/wiki/Buffer-Packing
+// https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-packing-rules
+// https://github.com/microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst#constant-texture-structured-byte-buffers
+typedef struct {
+    float x, y;    // 8 bytes  
+    uint32_t flags; 
+    uint32_t _pad; 
+} GPULine; 
 
 
-#define particle_collisions(_p, _chunk_ref) ({                                               \
-    do {                                                                                     \
-        for (uint32_t j = 0; j < (_chunk_ref)->p_index; j++) {                               \
-            collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
-        }                                                                                    \
-        for (uint32_t j = (_chunk_ref)->p_index+1; j < (_chunk_ref)->chunk->n_filled; j++) { \
-            collide((_p), (_chunk_ref)->chunk->particles[j]);                                \
-        }                                                                                    \
-    } while(0);                                                                              \
-})
+typedef struct {
+    float x, y; // gpu coords 8 bytes 
+    float padd1, padd2; 
+} GPUParticle; 
 
+
+typedef struct {
+    float l, r, b, t; 
+} Box; 
+
+
+typedef struct {
+    uint32_t x, y; 
+} Vec2i; 
+
+
+typedef struct {
+    float x, y; 
+} Vec2f; 
+
+
+typedef struct {
+    float x, y, z; 
+} Vec3f; 
+
+
+typedef enum { 
+    SIM_INVALID, 
+    SIM_RUNNING, 
+    SIM_STOPPED, 
+    SIM_PAUSED,
+    SIM_COUNTER
+} SimState;
+
+
+typedef struct Particle Particle; 
+typedef struct Chunk Chunk; 
+typedef struct ChunkRef ChunkRef; 
+
+typedef enum ChunkState {
+    CS_INVALID, 
+    CS_ONE,
+    CS_TB,
+    CS_LR,
+    CS_LRTB,
+    CS_COUNTER
+} ChunkState; 
+
+
+static inline const char* chunkstate_to_name(ChunkState cs) {
+    static const char *strings[] = { 
+		"CS_INVALID", 
+		"CS_ONE",
+		"CS_TB",
+		"CS_LR",
+		"CS_LRTB",
+		"CS_COUNTER"
+  	};  
+    return strings[cs];
+}
+
+
+
+struct ChunkRef {
+    Chunk* chunk;
+    uint32_t p_index; // particle index in chunk 
+}; 
+
+
+struct Chunk {
+    Particle** particles; 
+    Chunk* left; 
+    Chunk* right; 
+    Chunk* bottom; 
+    Chunk* top; 
+    Box box;
+    uint32_t particles_filled; 
+    uint32_t particles_free; 
+    uint32_t x; 
+    uint32_t y; 
+}; 
+
+
+struct Particle {
+    ChunkRef chunk_refs[4]; 
+    ChunkState chunk_state;
+    GPUParticle gpu;
+    Box box; 
+    Vec2f p; 
+    Vec2f v; 
+    float m; 
+    float r; 
+    uint32_t id; 
+}; 
+
+
+
+typedef struct {
+    Chunk*** chunks; 
+    uint32_t chunks_x; 
+    uint32_t chunks_y; 
+    Vec2f chunks_size; 
+    Vec2f dimensions; 
+    Chunk** border_chunks; 
+    uint32_t border_chunks_n; 
+    uint32_t particles_max_per_chunk; 
+    Particle* particles; 
+    uint32_t particles_n; 
+} Chunkmap; 
+
+
+void particle_print(Particle* p, const char* prefix) { 
+    printf("%sp->id:%d\n", prefix, p->id);
+    char buf[10000] = ""; 
+    char* cur = buf, * const end = buf + sizeof buf; 
+    for (uint32_t i = 0; i < 4; i++) {
+        if (end <= cur) {
+            fprintf(stderr, "particle_print: not enough memory.\n");
+            abort(); 
+        }
+        if (p->chunk_refs[i].chunk) {
+            cur += snprintf(cur, end-cur, 
+                "\n%s\t%d (%d,%d)@%p p_index=%d,free=%d,filled=%d", 
+                prefix, i, p->chunk_refs[i].chunk->x, p->chunk_refs[i].chunk->y, (void*)p->chunk_refs[i].chunk, p->chunk_refs[i].p_index, p->chunk_refs[i].chunk->particles_free, p->chunk_refs[i].chunk->particles_filled);
+        }
+    }
+    printf("%sp->chunk_refs: [%s\n%s]\n", prefix, buf, prefix); 
+    printf("%sp->chunk_state:%s\n", prefix, chunkstate_to_name(p->chunk_state));
+    printf("%sp->box:%f %f %f %f\n", prefix, box_unpack(p->box));
+    printf("%sp->gpu:%f %f\n", prefix, vec2_unpack(p->gpu));
+    printf("%sp->p:%f %f\n", prefix, vec2_unpack(p->p));
+}
+
+
+
+bool chunk_ref_is_valid(ChunkRef* chunk_ref) {
+    return chunk_ref->chunk->particles_filled > chunk_ref->p_index; 
+}
+
+
+uint32_t chunk_append(Chunk* chunk, Particle* p) {
+    /* printf("chunk_append %d,%d@%p\n", chunk->x, chunk->y, (void*)chunk); */
+    if (chunk->particles_free == 0) {
+        fprintf(stderr, "ERROR: appending to full chunk"); 
+        abort(); 
+    }
+    uint32_t p_index = chunk->particles_filled; 
+    chunk->particles[p_index] = p; 
+    chunk->particles_filled++;
+    chunk->particles_free--; 
+    return p_index; 
+} 
+
+
+void chunk_pop(ChunkRef* chunk_ref) {
+#ifdef DEBUG 
+    printf("chunk_pop (%d,%d) @ %p\n", chunk_ref->chunk->x, chunk_ref->chunk->y, (void*)chunk_ref->chunk);
+#endif // DEBUG 
+    if (chunk_ref->chunk->particles_filled == 0) {
+        printf("Can't pop empty chunk. exiting.\n"); 
+        abort(); 
+    }
+    if (!chunk_ref_is_valid(chunk_ref)) {
+        printf("chunk_pop invalid chunk_ref. exiting.\n"); 
+        printf("chunk_pop (%d,%d) @ %p\n", chunk_ref->chunk->x, chunk_ref->chunk->y, (void*)chunk_ref->chunk);
+        abort(); 
+    }
+    uint32_t last_index = chunk_ref->chunk->particles_filled - 1; 
+    if (last_index != chunk_ref->p_index) {
+        bool double_ref = false; 
+        for (uint32_t k = 0; k < 4; k++) {
+            ChunkRef* other_chunk_ref = &chunk_ref->chunk->particles[last_index]->chunk_refs[k];
+            if (other_chunk_ref->chunk && other_chunk_ref->chunk == chunk_ref->chunk && other_chunk_ref->p_index == last_index) {
+                if (double_ref) {
+                    fprintf(stderr, "Double ref!\n");
+                }
+                other_chunk_ref->p_index = chunk_ref->p_index;  
+                chunk_ref->chunk->particles[chunk_ref->p_index] = chunk_ref->chunk->particles[last_index]; 
+                double_ref = true; 
+            }
+        }
+
+    }
+    chunk_ref->chunk->particles[last_index] = NULL; 
+    chunk_ref->chunk->particles_filled--; 
+    chunk_ref->chunk->particles_free++; 
+    chunk_ref->chunk = NULL; 
+}
+
+
+void chunkmap_print(Chunkmap* chunkmap, const char* prefix) {
+    printf("-- Chunkmap -- \n"); 
+
+    /* Chunk*** chunks; */ 
+    /* uint32_t chunks_x; */ 
+    /* uint32_t chunks_y; */ 
+    /* Vec2f chunks_size; */ 
+    /* Vec2f dimensions; */ 
+    /* Chunk** border_chunks; */ 
+    /* uint32_t border_chunks_n; */ 
+    /* uint32_t particles_max_per_chunk; */ 
+    /* Particle* particles; */ 
+    /* uint32_t particles_n; */ 
+    /* printf("%schunks:%p\n\tchunks_n:%d chunks_y:%d\n\tchunks_size:%f,%f\n\tborder_chunks:%p\n\tborder_chunks_n:%d\n\tparticle_max_per_chunk:%d\n", (void*)chunkmap.chunks, chunkmap.chunks_x, chunkmap.chunks_y, chunkmap.chunks_size.x, chunkmap.chunks_size.y, (void*)chunkmap.border_chunks, chunkmap.border_chunks_n, chunkmap.particles_max_per_chunk); */ 
+    printf("%schunks@%p\n", prefix, (void*)chunkmap->chunks); 
+    printf("%schunks_count:(%d,%d)\n", prefix, chunkmap->chunks_x, chunkmap->chunks_y); 
+    printf("%schunks_size:(%f,%f)\n", prefix, vec2_unpack(chunkmap->chunks_size)); 
+    printf("%sdimensions:(%f,%f)\n", prefix, vec2_unpack(chunkmap->dimensions)); 
+    printf("%sborder_chunks@%p\n", prefix, (void*)chunkmap->border_chunks); 
+    for (uint32_t i = 0; i < chunkmap->chunks_x; i++) {
+        for (uint32_t j = 0; j < chunkmap->chunks_y; j++) {
+            if (chunkmap->chunks[i][j]->particles_filled > 0) { 
+                printf("%s %d,%d@%p free=%d filled=%d\n", prefix, i, j, (void*)chunkmap->chunks[i][j], chunkmap->chunks[i][j]->particles_free, chunkmap->chunks[i][j]->particles_filled);
+
+            }
+        }
+    }
+    printf("------------- \n"); 
+}
+
+
+void particle_set_chunk_state_one(Particle* p, Chunk* chunk_one) {
+#ifdef DEBUG
+    printf("particle_set_chunk_state_one\n");
+#endif // DEBUG
+    switch (p->chunk_state) {
+    case CS_ONE: {
+        if (p->chunk_refs[0].chunk != chunk_one) {
+            chunk_pop(&p->chunk_refs[0]);
+            p->chunk_refs[0].chunk = chunk_one;
+            p->chunk_refs[0].p_index = chunk_append(chunk_one, p);
+        }
+    } break; 
+    case CS_TB: {
+        chunk_pop(&p->chunk_refs[2]);
+        chunk_pop(&p->chunk_refs[3]);
+        p->chunk_refs[2].chunk = NULL;  
+        p->chunk_refs[3].chunk = NULL;  
+
+        p->chunk_refs[0].chunk = chunk_one;
+        p->chunk_refs[0].p_index = chunk_append(chunk_one, p);
+        p->chunk_state = CS_ONE;     
+    } break; 
+    case CS_LR: {
+        chunk_pop(&p->chunk_refs[1]);
+        p->chunk_refs[1].chunk = NULL;  
+
+        if (p->chunk_refs[0].chunk != chunk_one) {
+            chunk_pop(&p->chunk_refs[0]);
+            p->chunk_refs[0].chunk = chunk_one;
+            p->chunk_refs[0].p_index = chunk_append(chunk_one, p);
+        }
+        p->chunk_state = CS_ONE;     
+    } break; 
+    case CS_LRTB: {
+        chunk_pop(&p->chunk_refs[1]);
+        chunk_pop(&p->chunk_refs[2]);
+        chunk_pop(&p->chunk_refs[3]);
+        p->chunk_refs[1].chunk = NULL;  
+        p->chunk_refs[2].chunk = NULL;  
+        p->chunk_refs[3].chunk = NULL;  
+
+        if (p->chunk_refs[0].chunk != chunk_one) {
+            chunk_pop(&p->chunk_refs[0]);
+            p->chunk_refs[0].chunk = chunk_one;
+            p->chunk_refs[0].p_index = chunk_append(chunk_one, p);
+        }
+        p->chunk_state = CS_ONE;     
+    } break; 
+    default: {
+        fprintf(stderr, "invalid chunk state\n"); 
+        abort(); 
+    } break; 
+    }; 
+}
+
+void particle_set_chunk_state_lr(Particle* p, Chunk* chunk_left, Chunk* chunk_right) {
+#ifdef DEBUG
+    printf("particle_set_chunk_state_lr\n");
+#endif // DEBUG
+    switch (p->chunk_state) {
+    case CS_ONE: {
+        if (p->chunk_refs[0].chunk != chunk_left) {
+            chunk_pop(&p->chunk_refs[0]);
+            p->chunk_refs[0].chunk = chunk_left;
+            p->chunk_refs[0].p_index = chunk_append(chunk_left, p);
+        }
+        p->chunk_refs[1].chunk = chunk_right;
+        p->chunk_refs[1].p_index = chunk_append(chunk_right, p);
+        p->chunk_state = CS_LR;     
+    } break; 
+    case CS_TB: {
+        chunk_pop(&p->chunk_refs[2]);
+        chunk_pop(&p->chunk_refs[3]);
+        p->chunk_refs[2].chunk = NULL;  
+        p->chunk_refs[3].chunk = NULL;  
+
+        p->chunk_refs[0].chunk = chunk_left;
+        p->chunk_refs[0].p_index = chunk_append(chunk_left, p);
+        p->chunk_refs[1].chunk = chunk_right;
+        p->chunk_refs[1].p_index = chunk_append(chunk_right, p);
+        p->chunk_state = CS_LR;     
+    } break; 
+    case CS_LR: {
+        if (p->chunk_refs[0].chunk != chunk_left || p->chunk_refs[1].chunk != chunk_right) {
+            chunk_pop(&p->chunk_refs[0]);
+            chunk_pop(&p->chunk_refs[1]);
+            p->chunk_refs[0].chunk = chunk_left;
+            p->chunk_refs[0].p_index = chunk_append(chunk_left, p);
+            p->chunk_refs[1].chunk = chunk_right;
+            p->chunk_refs[1].p_index = chunk_append(chunk_right, p);
+        }
+    } break; 
+    case CS_LRTB: {
+        chunk_pop(&p->chunk_refs[2]);
+        chunk_pop(&p->chunk_refs[3]);
+        p->chunk_refs[2].chunk = NULL;  
+        p->chunk_refs[3].chunk = NULL;  
+
+        if (p->chunk_refs[0].chunk != chunk_left || p->chunk_refs[1].chunk != chunk_right) {
+            chunk_pop(&p->chunk_refs[0]);
+            chunk_pop(&p->chunk_refs[1]);
+            p->chunk_refs[0].chunk = chunk_left;
+            p->chunk_refs[0].p_index = chunk_append(chunk_left, p);
+            p->chunk_refs[1].chunk = chunk_right;
+            p->chunk_refs[1].p_index = chunk_append(chunk_right, p);
+        }
+        p->chunk_state = CS_LR;     
+    } break; 
+    default: {
+        fprintf(stderr, "invalid chunk state\n"); 
+        abort(); 
+    } break; 
+    }; 
+}
+
+void particle_set_chunk_state_tb(Particle* p, Chunk* chunk_top, Chunk* chunk_bottom) {
+#ifdef DEBUG
+    printf("particle_set_chunk_state_tb\n");
+#endif // DEBUG
+    switch (p->chunk_state) {
+    case CS_ONE: {
+        chunk_pop(&p->chunk_refs[0]);
+        p->chunk_refs[0].chunk = NULL;  
+
+        p->chunk_refs[2].chunk = chunk_top;
+        p->chunk_refs[2].p_index = chunk_append(chunk_top, p);
+        p->chunk_refs[3].chunk = chunk_bottom;
+        p->chunk_refs[3].p_index = chunk_append(chunk_bottom, p);
+        p->chunk_state = CS_TB;     
+    } break; 
+    case CS_TB: {
+        if (p->chunk_refs[2].chunk != chunk_top || p->chunk_refs[3].chunk != chunk_bottom) {
+            chunk_pop(&p->chunk_refs[2]);
+            chunk_pop(&p->chunk_refs[3]);
+            p->chunk_refs[2].chunk = chunk_top;
+            p->chunk_refs[2].p_index = chunk_append(chunk_top, p);
+            p->chunk_refs[3].chunk = chunk_bottom;
+            p->chunk_refs[3].p_index = chunk_append(chunk_bottom, p);
+        }
+    } break; 
+    case CS_LR: {
+        chunk_pop(&p->chunk_refs[0]);
+        chunk_pop(&p->chunk_refs[1]);
+        p->chunk_refs[0].chunk = NULL;  
+        p->chunk_refs[1].chunk = NULL;  
+
+        p->chunk_refs[2].chunk = chunk_top;
+        p->chunk_refs[2].p_index = chunk_append(chunk_top, p);
+        p->chunk_refs[3].chunk = chunk_bottom;
+        p->chunk_refs[3].p_index = chunk_append(chunk_bottom, p);
+        p->chunk_state = CS_TB;     
+    } break; 
+    case CS_LRTB: {
+        chunk_pop(&p->chunk_refs[0]);
+        chunk_pop(&p->chunk_refs[1]);
+        p->chunk_refs[0].chunk = NULL;  
+        p->chunk_refs[1].chunk = NULL;  
+
+        if (p->chunk_refs[2].chunk != chunk_top || p->chunk_refs[3].chunk != chunk_bottom) {
+            chunk_pop(&p->chunk_refs[2]);
+            chunk_pop(&p->chunk_refs[3]);
+            p->chunk_refs[2].chunk = chunk_top;
+            p->chunk_refs[2].p_index = chunk_append(chunk_top, p);
+            p->chunk_refs[3].chunk = chunk_bottom;
+            p->chunk_refs[3].p_index = chunk_append(chunk_bottom, p);
+        }
+        p->chunk_state = CS_TB;     
+    } break; 
+    default: {
+        fprintf(stderr, "invalid chunk state\n"); 
+        abort(); 
+    } break; 
+    }; 
+}
+
+void particle_set_chunk_state_lrtb(Particle* p, Chunk* chunk_bottom_right, Chunk* chunk_top_right, Chunk* chunk_top_left, Chunk* chunk_bottom_left) {
+#ifdef DEBUG
+    printf("particle_set_chunk_state_lrtb\n");
+#endif // DEBUG
+    switch (p->chunk_state) {
+    case CS_ONE: {
+        if (p->chunk_refs[0].chunk != chunk_bottom_right) {
+            chunk_pop(&p->chunk_refs[0]);
+            p->chunk_refs[0].chunk = chunk_bottom_right;  
+            p->chunk_refs[0].p_index = chunk_append(chunk_bottom_right, p);  
+        }
+        p->chunk_refs[1].chunk = chunk_top_right;  
+        p->chunk_refs[1].p_index = chunk_append(chunk_top_right, p);  
+        p->chunk_refs[2].chunk = chunk_top_left;  
+        p->chunk_refs[2].p_index = chunk_append(chunk_top_left, p);  
+        p->chunk_refs[3].chunk = chunk_bottom_left;  
+        p->chunk_refs[3].p_index = chunk_append(chunk_bottom_left, p);  
+        p->chunk_state = CS_LRTB;     
+    } break; 
+    case CS_TB: {
+        if (p->chunk_refs[2].chunk != chunk_top_left || p->chunk_refs[3].chunk != chunk_bottom_left) {
+            chunk_pop(&p->chunk_refs[2]);
+            chunk_pop(&p->chunk_refs[3]);
+            p->chunk_refs[2].chunk = chunk_top_left;
+            p->chunk_refs[2].p_index = chunk_append(chunk_top_left, p);
+            p->chunk_refs[3].chunk = chunk_bottom_left;
+            p->chunk_refs[3].p_index = chunk_append(chunk_bottom_left, p);
+        }
+        p->chunk_refs[0].chunk = chunk_bottom_right;  
+        p->chunk_refs[0].p_index = chunk_append(chunk_bottom_right, p);  
+        p->chunk_refs[1].chunk = chunk_top_right;  
+        p->chunk_refs[1].p_index = chunk_append(chunk_top_right, p);  
+        p->chunk_state = CS_LRTB;     
+    } break; 
+    case CS_LR: {
+        if (p->chunk_refs[0].chunk != chunk_bottom_right || p->chunk_refs[1].chunk != chunk_top_right) {
+            chunk_pop(&p->chunk_refs[0]);
+            chunk_pop(&p->chunk_refs[1]);
+            p->chunk_refs[0].chunk = chunk_bottom_right;
+            p->chunk_refs[0].p_index = chunk_append(chunk_bottom_right, p);
+            p->chunk_refs[1].chunk = chunk_top_right;
+            p->chunk_refs[1].p_index = chunk_append(chunk_top_right, p);
+        }
+        p->chunk_refs[2].chunk = chunk_top_left;  
+        p->chunk_refs[2].p_index = chunk_append(chunk_top_left, p);  
+        p->chunk_refs[3].chunk = chunk_bottom_left;  
+        p->chunk_refs[3].p_index = chunk_append(chunk_bottom_left, p);  
+        p->chunk_state = CS_LRTB;     
+    } break; 
+    case CS_LRTB: {
+        if (p->chunk_refs[0].chunk != chunk_bottom_right || p->chunk_refs[1].chunk != chunk_top_right) {
+            chunk_pop(&p->chunk_refs[0]);
+            chunk_pop(&p->chunk_refs[1]);
+            p->chunk_refs[0].chunk = chunk_bottom_right;
+            p->chunk_refs[0].p_index = chunk_append(chunk_bottom_right, p);
+            p->chunk_refs[1].chunk = chunk_top_right;
+            p->chunk_refs[1].p_index = chunk_append(chunk_top_right, p);
+        }
+        if (p->chunk_refs[2].chunk != chunk_top_left || p->chunk_refs[3].chunk != chunk_bottom_left) {
+            chunk_pop(&p->chunk_refs[2]);
+            chunk_pop(&p->chunk_refs[3]);
+            p->chunk_refs[2].chunk = chunk_top_left;
+            p->chunk_refs[2].p_index = chunk_append(chunk_top_left, p);
+            p->chunk_refs[3].chunk = chunk_bottom_left;
+            p->chunk_refs[3].p_index = chunk_append(chunk_bottom_left, p);
+        }
+        p->chunk_state = CS_TB;     
+    } break; 
+    default: {
+        fprintf(stderr, "invalid chunk state\n"); 
+        abort(); 
+    } break; 
+    }; 
+}
+
+void particle_set_chunk_state(Particle* p, ChunkState chunk_state) {
+    switch (p->chunk_state) {
+        case CS_ONE: {
+            chunk_pop(&p->chunk_refs[0]);
+        } break; 
+        case CS_TB: {
+            chunk_pop(&p->chunk_refs[2]);
+            chunk_pop(&p->chunk_refs[3]);
+        } break; 
+        case CS_LR: {
+            chunk_pop(&p->chunk_refs[0]);
+            chunk_pop(&p->chunk_refs[1]);
+        } break; 
+        case CS_LRTB: {
+            chunk_pop(&p->chunk_refs[0]);
+            chunk_pop(&p->chunk_refs[1]);
+            chunk_pop(&p->chunk_refs[2]);
+            chunk_pop(&p->chunk_refs[3]);
+        } break; 
+        default: {
+            fprintf(stderr, "invalid chunk state\n"); 
+            abort(); 
+        } break; 
+    }; 
+    p->chunk_state = chunk_state;  
+}
+
+
+void particle_update_chunkref(Particle* p, int i, Chunk* chunk, uint32_t p_index) {
+    p->chunk_refs[i].chunk = chunk; 
+    p->chunk_refs[i].p_index = p_index; 
+    if (!chunk_ref_is_valid(&p->chunk_refs[i])) {
+        printf("particle_update_chunkref invalid chunk_ref. exiting.\n"); 
+        abort(); 
+    }
+}
+
+
+
+void collide(Particle* p1, Particle* p2) {
+    if (p1 == NULL) {
+        fprintf(stderr, "p1 is NULL\n"); 
+        abort(); 
+    } 
+    if (p2 == NULL) {
+        fprintf(stderr, "p2 is NULL\n"); 
+        abort(); 
+    } 
+
+    float dx = p1->p.x - p2->p.x;
+    float dy = p1->p.y - p2->p.y;
+    float dr = p1->r + p2->r; 
+    float inv_sqrt = 1.0f/sqrt(dx*dx + dy*dy);
+    printf("%f, %f\n", vec2_unpack(p1->p));
+    printf("%f, %f\n", vec2_unpack(p2->p));
+    // printf("%f, %f\n", dx, dy);
+    // dr - sqrt(dx*dx+dy*dy)
+    if (dx*dx + dy*dy <= dr*dr) {
+        /* Vec2f tmp = p1->v; */ 
+        /* p1->v = p2->v; */ 
+        /* p2->v = tmp; */ 
+        printf("Collision %f\n", dr);
+
+        float alpha = 0.5f * dr * inv_sqrt - 0.5f;
+        alpha *= 1.5f; 
+        p2->p.x += alpha * dx; 
+        p2->p.y += alpha * dy; 
+        p1->p.x -= alpha * dx; 
+        p1->p.y -= alpha * dy; 
+    }
+}
+
+
+void particle_collisions(Particle* p, ChunkRef chunk_ref) {
+    for (uint32_t i = 0; i < chunk_ref.p_index; i++) {
+        collide(p, chunk_ref.chunk->particles[i]);
+    }
+    for (uint32_t i = chunk_ref.p_index+1; i < chunk_ref.chunk->particles_filled; i++) {
+        collide(p, chunk_ref.chunk->particles[i]);
+    }
+}
+
+/* 
 #define particle_update_chunk_ref(_p, _i, _chunk, _p_index) ({ \
     do {                                                       \
         (_p)->chunk_ref[(_i)].chunk = (_chunk);                \
         (_p)->chunk_ref[(_i)].p_index = (_p_index);            \
     } while(0);                                                \
 }) 
+
 
 #define chunk_append(_chunk, _p) ({                                            \
     uint32_t _p_index = UINT32_MAX;                                            \
@@ -149,6 +622,7 @@ typedef struct {
     _p_index;                                                                  \
 })
 
+
 #define chunk_pop(_chunk_ref) ({                                                                                               \
     do {                                                                                                                       \
         if ((_chunk_ref)->chunk->n_filled == 0) {                                                                              \
@@ -161,108 +635,13 @@ typedef struct {
         (_chunk_ref)->chunk->particles[(_chunk_ref)->chunk->n_filled] = NULL;                                                  \
     } while(0);                                                                                                                \
 })
-
-void vulkan_buffers_create(
-    SDL_GPUDevice* device, 
-    SDL_GPUBuffer** vertex_buffer_ptr,
-    size_t vertex_size,
-    uint32_t n_vertices,
-    SDL_GPUBuffer** index_buffer_ptr,
-    uint32_t n_indices,
-    SDL_GPUTransferBuffer** transfer_buffer_ptr,
-    void** transfer_data_ptr) {
-
-    *vertex_buffer_ptr = SDL_CreateGPUBuffer( // this is safe!
-        device, 
-        &(SDL_GPUBufferCreateInfo) {
-            .usage = SDL_GPU_BUFFERUSAGE_VERTEX, 
-            .size = vertex_size * n_vertices
-        }
-    ); 
-
-    *index_buffer_ptr = SDL_CreateGPUBuffer(
-        device, 
-        &(SDL_GPUBufferCreateInfo) {
-            .usage = SDL_GPU_BUFFERUSAGE_INDEX, 
-            .size = sizeof(uint16_t) * n_indices 
-        }
-    ); 
-
-    *transfer_buffer_ptr = SDL_CreateGPUTransferBuffer( // this is safe!
-        device,
-        &(SDL_GPUTransferBufferCreateInfo) {
-            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = (vertex_size * n_vertices) + (sizeof(uint16_t) * n_indices)
-        }
-    );
-
-    *transfer_data_ptr = SDL_MapGPUTransferBuffer(device, *transfer_buffer_ptr, false);
-}
-
-
-void vulkan_buffers_upload(SDL_GPUDevice* device, SDL_GPUBuffer* vertex_buffer, size_t vertex_size, uint32_t n_vertices, SDL_GPUBuffer* index_buffer, uint32_t n_indices, SDL_GPUTransferBuffer* transfer_buffer) {
-    SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
-    SDL_GPUCommandBuffer* upload_cmdbuf = SDL_AcquireGPUCommandBuffer(device);
-    SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(upload_cmdbuf);
-    SDL_UploadToGPUBuffer(
-        copy_pass,
-        &(SDL_GPUTransferBufferLocation) {
-            .transfer_buffer = transfer_buffer,
-            .offset = 0
-        },
-        &(SDL_GPUBufferRegion) {
-            .buffer = vertex_buffer,
-            .offset = 0,
-            .size = vertex_size * n_vertices 
-        },
-        false
-    );
-    SDL_UploadToGPUBuffer(
-        copy_pass,
-        &(SDL_GPUTransferBufferLocation) {
-            .transfer_buffer = transfer_buffer,
-            .offset = vertex_size * n_vertices
-        },
-        &(SDL_GPUBufferRegion) {
-            .buffer = index_buffer,
-            .offset = 0,
-            .size = sizeof(uint16_t) * n_indices
-        },
-        false
-    );
-    SDL_EndGPUCopyPass(copy_pass);
-    SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
-    SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
-}
-
-
-void print_vk_info(void) {
-    /* VkInstance vk_instance; */ 
-    /* VkApplicationInfo vk_app_info = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "SDL Vulkan App"  }; */ 
-    /* VkInstanceCreateInfo vk_create_info = { .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &vk_app_info }; */ 
-    /* if (vkCreateInstance(&vk_create_info, NULL, &vk_instance) != VK_SUCCESS) { */
-    /*     fprintf(stderr, "ERROR: \n"); */
-    /*     return 1; */ 
-    /* } */
-    /* uint32_t gpuCount = 0; */
-    /* vkEnumeratePhysicalDevices(vk_instance, &gpuCount, NULL); */
-    /* VkPhysicalDevice physicalDevices[gpuCount]; */
-    /* vkEnumeratePhysicalDevices(vk_instance, &gpuCount, physicalDevices); */
-
-    /* VkPhysicalDevice physicalDevice = physicalDevices[0]; // Use the first GPU (or select based on criteria) */
-    /* VkPhysicalDeviceProperties deviceProperties; */
-    /* vkGetPhysicalDeviceProperties(physicalDevice, &deviceProperties); */
-
-    /* VkDeviceSize minAlignment = deviceProperties.limits.minStorageBufferOffsetAlignment; */
-    /* printf("Minimum Storage Buffer Offset Alignment: %llu bytes\n", (unsigned long long)minAlignment); */
-    /* return 1; */ 
-}
+*/ 
 
 
 void destroy_sdl(
     SDL_GPUDevice* device, 
     SDL_Window* window,
-    Destroyer* destroyers,
+    Pipeline_Bomber* destroyers,
     uint32_t n_destroyers,
     SDL_GPUGraphicsPipeline* pipeline1,
     SDL_GPUTexture* texture) {
@@ -282,75 +661,87 @@ void destroy_sdl(
 }
 
 
-void handle_event(SDL_Event event, bool* quit, bool* debug_mode, uint* sim_state) {
+void event_handle(SDL_Event event, bool* quit, bool* debug_mode, SimState* sim_state, uint32_t* steps, float* dt) {
     switch (event.type) {
-        case SDL_EVENT_QUIT: {
+    case SDL_EVENT_QUIT: {
+        *quit = true; 
+    } break; 
+    case SDL_EVENT_KEY_DOWN: {
+        switch (event.key.key) {
+        case SDLK_Q: {
             *quit = true; 
+        } break;  
+        case SDLK_W: {
+
         } break; 
-        case SDL_EVENT_KEY_DOWN: {
-            switch (event.key.key) {
-                case SDLK_Q: {
-                    *quit = true; 
-                } break;  
-                case SDLK_W: {
-
+        case SDLK_S: {
+            *steps += 1;
+        } break; 
+        case SDLK_D: {
+            *debug_mode = !*debug_mode; 
+        } break; 
+        case SDLK_SPACE: {
+            switch(*sim_state) {
+                case SIM_RUNNING: { 
+                    *sim_state = SIM_PAUSED;
+                    printf("Simulation: paused!\n");
                 } break; 
-                case SDLK_S: {
-
+                case SIM_PAUSED: { 
+                    *sim_state = SIM_RUNNING;
+                    printf("Simulation: running!\n");
                 } break; 
-                case SDLK_D: {
-                    *debug_mode = !*debug_mode; 
-                } break; 
-                case SDLK_SPACE: {
-                    if (*sim_state == 0)
-                        *sim_state = 1; 
-                    else if (*sim_state == 1)
-                        *sim_state = 0; 
-                } break;
+                default: {} break; 
             }
+        } break;
+        case SDLK_LEFTBRACKET: {
+            *dt -= DT * 0.1f; 
+            printf("dt=%f\n", *dt); 
         } break; 
+        case SDLK_RIGHTBRACKET: {
+            *dt += DT * 0.1f; 
+            printf("dt=%f\n", *dt); 
+        } break; 
+        }
+    } break; 
     } 
 }
 
 
-float rand_float(float min, float max) {
-    return min + (max - min) * (rand() / (float)RAND_MAX);
-}
 
+// FIXME: Redo chunk tracking, it's bad
+// - ChunkState okay 
+// - Use binary search to account for big jumps 
+// - split the grid into groups of chunks to search
+// 
+// other option (worse, but easier to implement): 
+// - rerun chunk_overlap over groups of chunks 
+int physics_tick(float dt, Chunkmap* chunkmap, float particle_radius, Container* container) {
+    for (uint32_t i = 0; i < chunkmap->particles_n; i++) {
+        Particle* p = &chunkmap->particles[i]; 
 
-void collide(Particle* p1, Particle* p2) {
-    if (p1 == NULL) {
-        return; 
-    } 
-    if (p2 == NULL) {
-        return; 
-    } 
-    /* float v_tmp; */ 
-    /* v_tmp = p1->v.x; */ 
-    /* p1->v.x = p2->v.x; */ 
-    /* p2->v.x = v_tmp; */ 
-    /* v_tmp = p1->v.y; */ 
-    /* p1->v.y = p2->v.y; */ 
-    /* p2->v.y = v_tmp; */ 
-}
+        switch(p->chunk_state) {
+        case CS_ONE: {
+            particle_collisions(p, p->chunk_refs[0]);     
+        } break; 
+        case CS_LR: {
+            particle_collisions(p, p->chunk_refs[0]);     
+            particle_collisions(p, p->chunk_refs[1]);     
+        } break; 
+        case CS_TB: {
+            particle_collisions(p, p->chunk_refs[2]);     
+            particle_collisions(p, p->chunk_refs[3]);     
+        } break; 
+        case CS_LRTB: {
+            particle_collisions(p, p->chunk_refs[0]);     
+            particle_collisions(p, p->chunk_refs[1]);     
+            particle_collisions(p, p->chunk_refs[2]);     
+            particle_collisions(p, p->chunk_refs[3]);     
+        } break; 
+        default: {
+            fprintf(stderr, "invalid chunk state\n");
+        } break; 
+        }
 
-
-int physics_tick(
-    float dt, 
-    Particle* particles, 
-    uint32_t n_particles, 
-    float p_radius, 
-    Container* container, 
-    Chunk*** chunkmap, 
-    ChunkmapInfo chunkmap_info, 
-    Chunk** border_chunks, 
-    uint32_t n_border_chunks) {
-
-    for (uint32_t i = 0; i < n_particles; i++) {
-        Particle* p = &particles[i]; 
-        // p->v.y -= 1.0f; 
-        p->v.x += rand_float(-10.0f, 100.0f);  
-        /* p->v.y += rand_float(-100.0f, 10.0f); */
         float dx = p->v.x*dt; 
         float dy = p->v.y*dt; 
         p->p.x += dx;  
@@ -364,414 +755,127 @@ int physics_tick(
         p->gpu.x += dx*container->scalar;
         p->gpu.y += dy*container->zoom;
 
-        switch (p->chunk_state) {
-            case ONE: {
-                ChunkRef chunk_ref = p->chunk_ref[0]; 
-                particle_collisions(p, &chunk_ref);
-                if (p->box.b < chunk_ref.chunk->box.b) { // bottom edge crossed bottom 
-                    if (chunk_ref.chunk->bottom != NULL) {
-                        uint32_t p_index_bottom = chunk_append(chunk_ref.chunk->bottom, p);
-                        if (p_index_bottom == UINT32_MAX) {
-                            return -1; 
-                        }
-                        if (p->box.t < chunk_ref.chunk->box.b) { // top edge crossed bottom 
-                            chunk_pop(&chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->bottom, p_index_bottom); 
-                        } else {
-                            p->chunk_state = TOP_BOTTOM;
-                            particle_update_chunk_ref(p, 2, chunk_ref.chunk, chunk_ref.p_index); 
-                            particle_update_chunk_ref(p, 3, chunk_ref.chunk->bottom, p_index_bottom); 
-                        }
-                    } else {
-                        p->v.y *= -1; 
-                    }
-                } else if (p->box.t > chunk_ref.chunk->box.t) { // top edge crossed top 
-                    if (chunk_ref.chunk->top != NULL) {
-                        uint32_t p_index_top = chunk_append(chunk_ref.chunk->top, p);
-                        if (p_index_top == UINT32_MAX) {
-                            return -1; 
-                        }
-                        if (p->box.b > chunk_ref.chunk->box.t) { // bottom edge crossed top
-                            chunk_pop(&chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->top, p_index_top); 
-                        } else {
-                            p->chunk_state = TOP_BOTTOM; 
-                            particle_update_chunk_ref(p, 2, chunk_ref.chunk->top, p_index_top); 
-                            particle_update_chunk_ref(p, 3, chunk_ref.chunk, chunk_ref.p_index); 
-                        }
-                    } else {
-                        p->v.y *= -1; 
-                    }
-                }
-                if (p->box.l < chunk_ref.chunk->box.l) { // left edge crossed left 
-                    if (chunk_ref.chunk->left != NULL) {
-                        uint32_t p_index_left = chunk_append(chunk_ref.chunk->left, p);
-                        if (p_index_left == UINT32_MAX) {
-                            return -1;
-                        } 
-                        if (p->box.r < chunk_ref.chunk->box.l) { // right edge crossed left 
-                            chunk_pop(&chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->left, p_index_left); 
-                        } else {
-                            p->chunk_state = LEFT_RIGHT; 
-                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->left, p_index_left); 
-                            particle_update_chunk_ref(p, 1, chunk_ref.chunk, chunk_ref.p_index); 
-                        }
-                    } else {
-                        p->v.x *= -1; 
-                    }
-                } else if (p->box.r > chunk_ref.chunk->box.r) { // right edge crossed right 
-                    if (chunk_ref.chunk->right != NULL) {
-                        uint32_t p_index_right = chunk_append(chunk_ref.chunk->right, p);
-                        if (p_index_right == UINT32_MAX) {
-                            return -1; 
-                        }
-                        if (p->box.l > chunk_ref.chunk->box.r) { // left edge crossed right
-                            chunk_pop(&chunk_ref); 
-                            particle_update_chunk_ref(p, 0, chunk_ref.chunk->right, p_index_right); 
-                        } else {
-                            p->chunk_state = LEFT_RIGHT;
-                            particle_update_chunk_ref(p, 0, chunk_ref.chunk, chunk_ref.p_index); 
-                            particle_update_chunk_ref(p, 1, chunk_ref.chunk->right, p_index_right); 
-                        }
-                    } else {
-                        p->v.x *= -1; 
-                    }
-                }
-            } break;
-            case TOP_BOTTOM: { 
-                ChunkRef chunk_ref_top = p->chunk_ref[2]; 
-                ChunkRef chunk_ref_bottom = p->chunk_ref[3]; 
-                particle_collisions(p, &chunk_ref_top);
-                particle_collisions(p, &chunk_ref_bottom);
-                if (p->box.r > chunk_ref_bottom.chunk->box.r) { // right edge crossed right
-                    if (chunk_ref_bottom.chunk->right != NULL) {
-                        Chunk* chunk_bottom_right = chunk_ref_bottom.chunk->right; 
-                        Chunk* chunk_top_right = chunk_ref_top.chunk->right; 
-                        uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p); 
-                        uint32_t p_index_top_right = chunk_append(chunk_top_right, p); 
-                        if (p_index_bottom_right == UINT32_MAX || p_index_top_right == UINT32_MAX) {
-                            return -1; 
-                        }
-                        if (p->box.l > chunk_ref_bottom.chunk->box.r) { // left edge crossed right 
-                            chunk_pop(&chunk_ref_top); 
-                            chunk_pop(&chunk_ref_bottom); 
-                            particle_update_chunk_ref(p, 2, chunk_top_right, p_index_top_right); 
-                            particle_update_chunk_ref(p, 3, chunk_bottom_right, p_index_bottom_right); 
-                        } else {
-                            p->chunk_state = LRTB; 
-                            Chunk* chunk_top_left = chunk_ref_top.chunk; 
-                            Chunk* chunk_bottom_left = chunk_ref_bottom.chunk; 
-                            uint32_t p_index_top_left = chunk_ref_top.p_index;
-                            uint32_t p_index_bottom_left = chunk_ref_bottom.p_index;
-                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
-                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
-                            particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
-                            particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
-                        }
-                    } else {
-                        p->v.x *= -1; 
-                    }
-                } else if (p->box.l < chunk_ref_bottom.chunk->box.l) { // left edge crossed left 
-                    if (chunk_ref_bottom.chunk->left != NULL) {
-                        Chunk* chunk_top_left = chunk_ref_top.chunk->left;
-                        Chunk* chunk_bottom_left = chunk_ref_bottom.chunk->left;
-                        uint32_t p_index_bottom_left = chunk_append(chunk_ref_bottom.chunk->left, p); 
-                        uint32_t p_index_top_left = chunk_append(chunk_ref_top.chunk->left, p); 
-                        if (p_index_bottom_left == UINT32_MAX|| p_index_top_left == UINT32_MAX) {
-                            return -1; 
-                        }
-                        if (p->box.r < chunk_ref_bottom.chunk->box.l) { // right edge crossed left 
-                            chunk_pop(&chunk_ref_top); 
-                            chunk_pop(&chunk_ref_bottom); 
-                            particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
-                            particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
-                        } else {
-                            p->chunk_state = LRTB; 
-                            Chunk* chunk_top_right = chunk_ref_top.chunk; 
-                            Chunk* chunk_bottom_right = chunk_ref_bottom.chunk; 
-                            uint32_t p_index_top_right = chunk_ref_top.p_index;
-                            uint32_t p_index_bottom_right = chunk_ref_bottom.p_index;
-                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
-                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
-                            particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
-                            particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
-                        }
-                    } else {
-                        p->v.x *= -1; 
-                    }
-                } else if (p->box.t < chunk_ref_top.chunk->box.b) { // top edge crossed bottom of top chunk 
-                    uint32_t p_index = chunk_ref_bottom.p_index; 
-                    if (p_index < 0) {
-                        return -1; 
-                    }
-                    p->chunk_state = ONE; 
-                    chunk_pop(&chunk_ref_top); 
-                    Chunk* chunk = chunk_ref_bottom.chunk;
-                    particle_update_chunk_ref(p, 0, chunk, p_index); 
-                } else if (p->box.b > chunk_ref_bottom.chunk->box.t) { // bottom edge crossed top of bottom chunk
-                    uint32_t p_index = chunk_ref_top.p_index; 
-                    if (p_index < 0) {
-                        return -1; 
-                    }
-                    p->chunk_state = ONE; 
-                    chunk_pop(&chunk_ref_bottom); 
-                    Chunk* chunk = chunk_ref_top.chunk;
-                    particle_update_chunk_ref(p, 0, chunk, p_index); 
-                }
-            } break;
-            case LEFT_RIGHT: {
-                ChunkRef chunk_ref_left = p->chunk_ref[0]; 
-                ChunkRef chunk_ref_right = p->chunk_ref[1]; 
-                particle_collisions(p, &chunk_ref_left);
-                particle_collisions(p, &chunk_ref_right);
-                if (p->box.t > chunk_ref_left.chunk->box.t) { // top edge crossed top  
-                    if (chunk_ref_left.chunk->top != NULL) {
-                        Chunk* chunk_top_left = chunk_ref_left.chunk->top; 
-                        Chunk* chunk_top_right = chunk_ref_right.chunk->top; 
-                        uint32_t p_index_top_left = chunk_append(chunk_top_left, p); 
-                        uint32_t p_index_top_right = chunk_append(chunk_top_right, p); 
-                        if (p_index_top_left == UINT32_MAX || p_index_top_right == UINT32_MAX) {
-                            return -1; 
-                        }
-                        if (p->box.b > chunk_ref_left.chunk->box.t) { // bottom edge crossed top 
-                            chunk_pop(&chunk_ref_left); 
-                            chunk_pop(&chunk_ref_right); 
-                            particle_update_chunk_ref(p, 0, chunk_top_left, p_index_top_left); 
-                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
-                        } else { 
-                            p->chunk_state = LRTB; 
-                            Chunk* chunk_bottom_left = chunk_ref_left.chunk; 
-                            Chunk* chunk_bottom_right = chunk_ref_right.chunk; 
-                            uint32_t p_index_bottom_left = chunk_ref_left.p_index;
-                            uint32_t p_index_bottom_right = chunk_ref_right.p_index;
-                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
-                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
-                            particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
-                            particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
-                        }
-                    } else {
-                        p->v.y *= -1; 
-                    }
-                } else if (p->box.b < chunk_ref_left.chunk->box.b) { // bottom edge crossed bottom 
-                    if (chunk_ref_left.chunk->bottom != NULL) {
-                        Chunk* chunk_bottom_left = chunk_ref_left.chunk->bottom; 
-                        Chunk* chunk_bottom_right = chunk_ref_right.chunk->bottom; 
-                        uint32_t p_index_bottom_left = chunk_append(chunk_bottom_left, p); 
-                        uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p); 
-                        if (p_index_bottom_left == UINT32_MAX || p_index_bottom_right == UINT32_MAX) {
-                            return -1; 
-                        }
-                        if (p->box.t < chunk_ref_left.chunk->box.b) { // top edge crossed bottom  
-                            chunk_pop(&chunk_ref_left); 
-                            chunk_pop(&chunk_ref_right); 
-                            particle_update_chunk_ref(p, 0, chunk_bottom_left, p_index_bottom_left); 
-                            particle_update_chunk_ref(p, 1, chunk_bottom_right, p_index_bottom_right); 
-                        } else { 
-                            p->chunk_state = LRTB; 
-                            Chunk* chunk_top_left = chunk_ref_left.chunk; 
-                            Chunk* chunk_top_right = chunk_ref_right.chunk; 
-                            uint32_t p_index_top_left = chunk_ref_left.p_index;
-                            uint32_t p_index_top_right = chunk_ref_right.p_index;
-                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
-                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
-                            particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
-                            particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
-                        }
-                    } else {
-                        p->v.y *= -1; 
-                    }
-                } else if (p->box.r < chunk_ref_right.chunk->box.l) { // right edge crossed left of right chunk  
-                    p->chunk_state = ONE; 
-                    chunk_pop(&chunk_ref_right); 
-                    particle_update_chunk_ref(p, 0, chunk_ref_left.chunk, chunk_ref_left.p_index);
-                } else if (p->box.l > chunk_ref_left.chunk->box.r) { // left edge crossed right of left chunk 
-                    p->chunk_state = ONE; 
-                    chunk_pop(&chunk_ref_left); 
-                    particle_update_chunk_ref(p, 0, chunk_ref_right.chunk, chunk_ref_right.p_index);
-                }
-            } break;
-            case LRTB: {
-                ChunkRef chunk_ref_bottom_right = p->chunk_ref[0]; 
-                ChunkRef chunk_ref_top_right = p->chunk_ref[1]; 
-                ChunkRef chunk_ref_top_left = p->chunk_ref[2]; 
-                ChunkRef chunk_ref_bottom_left = p->chunk_ref[3]; 
-                particle_collisions(p, &chunk_ref_bottom_right);
-                particle_collisions(p, &chunk_ref_top_right);
-                particle_collisions(p, &chunk_ref_top_left);
-                particle_collisions(p, &chunk_ref_bottom_left);
-                if (p->box.l > chunk_ref_top_left.chunk->box.r) { // left edge crossed right of left
-                    p->chunk_state = TOP_BOTTOM;
-                    chunk_pop(&chunk_ref_top_left); 
-                    chunk_pop(&chunk_ref_bottom_left); 
-                    particle_update_chunk_ref(p, 2, chunk_ref_top_right.chunk, chunk_ref_top_right.p_index); 
-                    particle_update_chunk_ref(p, 3, chunk_ref_bottom_right.chunk, chunk_ref_bottom_right.p_index); 
-                } else if (p->box.r < chunk_ref_top_right.chunk->box.l) { // right edge crossed left of right 
-                    p->chunk_state = TOP_BOTTOM;
-                    chunk_pop(&chunk_ref_top_right); 
-                    chunk_pop(&chunk_ref_bottom_right); 
-                    particle_update_chunk_ref(p, 2, chunk_ref_top_left.chunk, chunk_ref_top_left.p_index); 
-                    particle_update_chunk_ref(p, 3, chunk_ref_bottom_left.chunk, chunk_ref_bottom_left.p_index); 
-                } else if (p->box.b > chunk_ref_bottom_left.chunk->box.t) { // bottom edge crossed top of bottom 
-                    p->chunk_state = LEFT_RIGHT;
-                    chunk_pop(&chunk_ref_bottom_left); 
-                    chunk_pop(&chunk_ref_bottom_right); 
-                    particle_update_chunk_ref(p, 0, chunk_ref_top_left.chunk, chunk_ref_top_left.p_index); 
-                    particle_update_chunk_ref(p, 1, chunk_ref_top_right.chunk, chunk_ref_bottom_left.p_index); 
-                } else if (p->box.t < chunk_ref_top_left.chunk->box.b) { // top edge crossed bottom of top 
-                    p->chunk_state = LEFT_RIGHT;
-                    chunk_pop(&chunk_ref_top_left); 
-                    chunk_pop(&chunk_ref_top_right); 
-                    particle_update_chunk_ref(p, 0, chunk_ref_bottom_left.chunk, chunk_ref_bottom_left.p_index); 
-                    particle_update_chunk_ref(p, 1, chunk_ref_bottom_right.chunk, chunk_ref_bottom_right.p_index); 
-                }
-            } break;
-            default: {
-                fprintf(stderr, "ERROR: invalid chunk_state: %d\n", p->chunk_state);
-                return -1; 
-            } break;
+        /* printf("physics_tick\n"); */ 
+        uint32_t i = UINT32_MAX, j = UINT32_MAX;
+        bool lambda_cond = false, mu_cond = false;
+        if (p->box.l <= 0.0f) { 
+            p->p.x = 0.0f + particle_radius; 
+            p->v.x *= -1.0f; 
+            p->box.l = 0.0f;  
+            p->box.r = 2 * particle_radius;  
+            lambda_cond = true; 
+            i = 0; 
+        } else if (p->box.r >= chunkmap->dimensions.x) {
+            p->p.x = chunkmap->dimensions.x - particle_radius; 
+            p->v.x *= -1.0f; 
+            p->box.l = p->p.x - particle_radius;
+            p->box.r = chunkmap->dimensions.x;
+            lambda_cond = true; 
+            i = chunkmap->chunks_x - 1; 
+        }
+        if (p->box.b <= 0.0f) {
+            p->p.y = 0.0f + particle_radius; 
+            p->v.y *= -1.0f; 
+            p->box.b = 0.0f;  
+            p->box.t = 2 * particle_radius;  
+            mu_cond = true; 
+            j = 0; 
+        } else if (p->box.t >= chunkmap->dimensions.y) {
+            p->p.y = chunkmap->dimensions.y - particle_radius; 
+            p->v.y *= -1.0f; 
+            p->box.b = p->p.y - particle_radius;
+            p->box.t = chunkmap->dimensions.y;
+            mu_cond = true; 
+            j = chunkmap->chunks_y - 1; 
+        }
+        
+        if (!lambda_cond) {
+            float lambda = p->box.l/chunkmap->chunks_size.x; 
+            uint32_t lambda_floor = floorf(lambda); 
+            /* lambda_cond = lambda > lambda_floor && lambda < lambda_floor + 1 - 2 * particle_radius; */
+            lambda_cond = lambda > lambda_floor && lambda + 2*particle_radius/chunkmap->chunks_size.x < lambda_floor+1; 
+            i = lambda_floor; 
+        }
+        if (!mu_cond) {
+            float mu = p->box.b/chunkmap->chunks_size.y; 
+            uint32_t mu_floor = floorf(mu); 
+            // mu_cond = mu > mu_floor && mu < mu_floor + 1 - 2 * particle_radius;
+            mu_cond = mu > mu_floor && mu + 2*particle_radius/chunkmap->chunks_size.y < mu_floor+1; 
+            j = mu_floor; 
+        }
+
+        if (lambda_cond && mu_cond) { // ONE
+            Chunk* chunk_one = chunkmap->chunks[i][j]; 
+            /* for (uint32_t k = 0; k < N; k++) { */
+            /*     particle_print(&chunkmap->particles[k], "> "); */ 
+            /* } */
+            /* particle_print(p, "! "); */ 
+            particle_set_chunk_state_one(p, chunk_one);  
+            /* for (uint32_t k = 0; k < N; k++) { */
+            /*     particle_print(&chunkmap->particles[k], "< "); */ 
+            /* } */
+        } else if (lambda_cond && !mu_cond) { // TOP_BOTTOM 
+            Chunk* chunk_bottom = chunkmap->chunks[i][j]; 
+            Chunk* chunk_top = chunk_bottom->top;  
+            /* for (uint32_t k = 0; k < 2; k++) { */
+            /*     particle_print(&chunkmap->particles[k], "> "); */ 
+            /* } */
+            particle_set_chunk_state_tb(p, chunk_top, chunk_bottom); 
+            /* for (uint32_t k = 0; k < 2; k++) { */
+            /*     particle_print(&chunkmap->particles[k], "> "); */ 
+            /* } */
+        } else if (!lambda_cond && mu_cond) { // LEFT_RIGHT 
+            Chunk* chunk_left = chunkmap->chunks[i][j]; 
+            Chunk* chunk_right = chunk_left->right;  
+            particle_set_chunk_state_lr(p, chunk_left, chunk_right); 
+        } else if (!lambda_cond && !mu_cond) { // LRTB 
+            Chunk* chunk_bottom_left = chunkmap->chunks[i][j]; 
+            Chunk* chunk_bottom_right = chunk_bottom_left->right; 
+            Chunk* chunk_top_left = chunk_bottom_left->top;  
+            Chunk* chunk_top_right = chunk_bottom_right->top;  
+            if (chunk_bottom_left == NULL) {
+                printf("chunk null!\n");
+                abort(); 
+            }
+            if (chunk_bottom_right == NULL) {
+                printf("chunk null!\n");
+                abort(); 
+            }
+            if (chunk_top_left == NULL) {
+                printf("chunk null!\n");
+                abort(); 
+            }
+            if (chunk_top_right == NULL) {
+                printf("chunk null!\n");
+                abort(); 
+            }
+            particle_set_chunk_state_lrtb(p, chunk_bottom_right, chunk_top_right, chunk_top_left, chunk_bottom_left); 
         }
     }
     return 0;
 }
 
 
-int setup_simulation_memory(
-    void** ptr_mem_block, 
-    Chunk**** ptr_chunkmap, // im a four star programmer, but i think this is really necessary, no? 
-    ChunkmapInfo chunkmap_info,
-    Chunk*** ptr_border_chunks,
-    uint32_t n_border_chunks,
-    uint32_t n_max_particles_per_chunk,
-    Particle** ptr_particles,
-    uint32_t n_particles) {
+int setup_particles(Chunkmap* chunkmap, float particle_radius, Container* container) {
+    float pad = 1.0f * particle_radius; 
+    uint32_t particles_per_row = 1.0f/((particle_radius + pad)*container->scalar);
+    uint32_t particles_per_col = 1.0f/((particle_radius + pad)*container->zoom);
 
-    uint32_t nx = chunkmap_info.n.x; 
-    uint32_t ny = chunkmap_info.n.y; 
-    size_t total_size = 
-        n_border_chunks * sizeof(Chunk*) +
-        nx * sizeof(Chunk*) +
-        nx * ny * sizeof(Chunk*) +
-        nx * ny * sizeof(Chunk) + 
-        nx * ny * n_max_particles_per_chunk * sizeof(Particle*) +
-        n_particles * sizeof(Particle);
-
-    void* mem_block = (void*) malloc(total_size);
-    if (mem_block == NULL) {
-        fprintf(stderr, "ERROR: malloc of memory block (size=%zu) failed.\n", total_size);
-        return -1;
-    }
-    printf("Allocated %zuKB on heap.\n", total_size/1000);
-
-    // heap layout: 
-    // |  abstraction  |  type            |  n                                |  description            |
-    // | ------------- | ---------------- | --------------------------------- | ----------------------- | 
-    // |  chunkmap     |  Chunk**         |  number of chunks in x direction  |  chunk column pointers  |
-    // |               |  Chunk*          |  number of chunks in y direction  |  chunk column pointers  |
-    // |               |  Chunk           |  1                                |  This repeats>          |
-    // |               |  Particle*       |  n_max_particles_per_chunk        |  n_chunks times>        |
-    // |               |  ...             |  ...                              |  ...                    |
-    // |  particles    |  Particle        |  n_particles                      |                         | 
-
-    Chunk** border_chunks = (Chunk**)mem_block;
-    Chunk*** chunkmap = (Chunk***)(border_chunks + n_border_chunks);
-
-    for (uint32_t i = 0; i < nx; i++) {
-        chunkmap[i] = (Chunk**)(chunkmap + nx + i * ny);
-        for (uint32_t j = 0; j < ny; j++) {
-            chunkmap[i][j] = (Chunk*)((char*)(chunkmap + nx + nx * ny) + (j + i * ny) * (sizeof(Chunk) + n_max_particles_per_chunk * sizeof(Particle*))); 
-            Chunk* chunk = chunkmap[i][j];
-            chunk->particles = (Particle**) ((char*)chunkmap[i][j] + sizeof(Chunk));  
-            memset(chunk->particles, 0, n_max_particles_per_chunk * sizeof(Particle*));
-            chunk->box.l = i*chunkmap_info.size.x; 
-            chunk->box.r = (i+1)*chunkmap_info.size.x;
-            chunk->box.b = j*chunkmap_info.size.y;
-            chunk->box.t = (j+1)*chunkmap_info.size.y;
-            chunk->left = NULL; 
-            chunk->right = NULL; 
-            chunk->bottom = NULL; 
-            chunk->top = NULL; 
-            chunk->n_filled = 0; 
-            chunk->n_free = n_max_particles_per_chunk;
-            chunk->xy.x = i; 
-            chunk->xy.y = j; 
-        }
-    }
-
-    uint32_t i_border_chunks = 0; 
-    for (uint32_t i = 0; i < nx; i++) {
-        for (uint32_t j = 0; j < ny; j++) {
-            bool is_border_chunk = false; 
-            if (i > 0) 
-                chunkmap[i][j]->left = chunkmap[i-1][j];
-            else if (!is_border_chunk) {
-                border_chunks[i_border_chunks] = chunkmap[i][j]; 
-                i_border_chunks++; 
-                is_border_chunk = true; 
-            }
-            if (j > 0) 
-                chunkmap[i][j]->bottom = chunkmap[i][j-1];
-            else if (!is_border_chunk) {
-                border_chunks[i_border_chunks] = chunkmap[i][j]; 
-                i_border_chunks++; 
-                is_border_chunk = true; 
-            }
-            if (i + 1 < chunkmap_info.n.x) 
-                chunkmap[i][j]->right = chunkmap[i+1][j];
-            else if (!is_border_chunk) {
-                border_chunks[i_border_chunks] = chunkmap[i][j]; 
-                i_border_chunks++; 
-                is_border_chunk = true; 
-            }
-            if (j + 1 < chunkmap_info.n.y) 
-                chunkmap[i][j]->top = chunkmap[i][j+1];
-            else if (!is_border_chunk) {
-                border_chunks[i_border_chunks] = chunkmap[i][j]; 
-                i_border_chunks++; 
-                is_border_chunk = true; 
-            }
-        }
-    }
-    if (n_border_chunks != i_border_chunks) {
-        fprintf(stderr, "ERROR: n_border_chunks is wrong. %d %d\n", i_border_chunks, n_border_chunks);
-        free(mem_block); 
-        return -1; 
-    }
-    Particle* particles = (Particle*) ((char*)chunkmap[nx-1][ny-1] + n_max_particles_per_chunk * sizeof(Particle*) + sizeof(Chunk)); 
-    memset(particles, 0, n_particles * sizeof(Particle));  
-    *ptr_mem_block = (void*) mem_block;  
-    *ptr_border_chunks = (Chunk**) border_chunks; 
-    *ptr_chunkmap = (Chunk***) chunkmap; 
-    *ptr_particles = (Particle*) particles; 
-    return 0; 
-}
-
-
-int setup_particles(
-    Chunk*** chunkmap, 
-    ChunkmapInfo chunkmap_info, 
-    Particle* particles, 
-    uint32_t n_particles, 
-    float particle_radius, 
-    Container* container) {
-
-    uint32_t particles_per_row = 1.0f/(particle_radius*container->scalar);
-    uint32_t particles_per_col = 1.0f/(particle_radius*container->zoom);
-
-    uint32_t n_particles_possible = particles_per_row*particles_per_col;
-    if (n_particles_possible < n_particles) {
-        fprintf(stderr, "Too many particles %d for container %d\n", n_particles, n_particles_possible); 
+    uint32_t particles_n_max = particles_per_row*particles_per_col;
+    if (chunkmap->particles_n > particles_n_max) {
+        fprintf(stderr, "Too many particles %d for container %d\n", chunkmap->particles_n, particles_n_max); 
         return -1; 
     }
 
-    float v_start = 1000.0f; 
-    for (uint32_t i = 0; i < n_particles; i++) { 
-        Particle* p = &particles[i]; 
+    float v_start = SPEED;  
+    for (uint32_t i = 0; i < chunkmap->particles_n; i++) { 
+        // Particle* p = &((Particle*)chunkmap->particles)[i]; 
+        Particle* p = &chunkmap->particles[i];
 
         uint32_t col = i%particles_per_row;
-        uint32_t row = (uint) (i/particles_per_row);
-        p->p.x = particle_radius*(1.0f + 2.0f*col); 
-        p->p.y = particle_radius*(1.0f + 2.0f*row); 
+        uint32_t row = (uint32_t) (i/particles_per_row);
+        p->p.x = (particle_radius + pad)*(1.0f + 2.0f*col); 
+        p->p.y = (particle_radius + pad)*(1.0f + 2.0f*row); 
 
         p->box.l = p->p.x-particle_radius; 
         p->box.r = p->p.x+particle_radius;
@@ -780,87 +884,95 @@ int setup_particles(
 
         p->gpu.x = -1.0f + p->p.x * container->scalar; 
         p->gpu.y = -1.0f + p->p.y * container->zoom;
-        /* p->gpu.z = 0.0f; */ 
 
         p->v.x = rand_float(-v_start, v_start); 
         p->v.y = rand_float(-v_start, v_start); 
-        /* p->v.x = 1000.0f; */  
-        /* p->v.y = 0.0f; */  
 
+        /* p->v.x = -SPEED; */  
+        /* p->v.y = -SPEED; */ 
+        // particle_print(p); 
+        p->id = i; 
+        p->r = particle_radius;
     }
 
-    for (uint32_t i = 0; i < chunkmap_info.n.x; i++) {
-        for (uint32_t j = 0; j < chunkmap_info.n.y; j++) {
-            Chunk* chunk = chunkmap[i][j]; 
-            for (uint32_t k = 0; k < n_particles; k++) {
-                Particle* p = &particles[k]; 
+    for (uint32_t i = 0; i < chunkmap->chunks_x; i++) {
+        for (uint32_t j = 0; j < chunkmap->chunks_y; j++) {
+            Chunk* chunk = chunkmap->chunks[i][j]; 
+            for (uint32_t k = 0; k < chunkmap->particles_n; k++) {
+                Particle* p = &chunkmap->particles[k]; 
+                /* particle_print(p, "\t\t\t"); */
                 if (box_overlap(p->box, chunk->box)) {
                     switch (p->chunk_state) {
-                        case INVALID: {
+                        case CS_INVALID: {
                             uint32_t p_index = chunk_append(chunk, p);
                             if (p_index == UINT32_MAX) {
                                 fprintf(stderr, "ERROR: chunk_append failed.\n");
                                 return -1; 
                             }
-                            p->chunk_state = ONE; 
-                            particle_update_chunk_ref(p, 0, chunk, p_index); 
+                            p->chunk_state = CS_ONE; 
+                            particle_update_chunkref(p, 0, chunk, p_index); 
                         } break; 
-                        case ONE: {
-                              if (p->chunk_ref[0].chunk->right == chunk) { // the way we iterate, we only have to check if its a chunk to the right  
-                                    uint32_t p_index = chunk_append(chunk, p);
-                                    if (p_index == UINT32_MAX) {
-                                        fprintf(stderr, "ERROR: chunk_append failed.\n");
-                                        return -1; 
-                                    }
-                                    p->chunk_state = LEFT_RIGHT; 
-                                    particle_update_chunk_ref(p, 1, chunk, p_index); 
-                              } else if (p->chunk_ref[0].chunk->top == chunk) {
-                                    uint32_t p_index = chunk_append(chunk, p);
-                                    if (p_index == UINT32_MAX) {
-                                        fprintf(stderr, "ERROR: chunk_append failed.\n");
-                                        return -1; 
-                                    }
-                                    p->chunk_state = TOP_BOTTOM; 
-                                    particle_update_chunk_ref(p, 2, chunk, p_index); 
-                                    particle_update_chunk_ref(p, 3, p->chunk_ref[0].chunk, p->chunk_ref[0].p_index); 
-                              }
+                        case CS_ONE: {
+                            if (p->chunk_refs[0].chunk->right == chunk) { // the way we iterate, we only have to check if its a chunk to the right  
+                                uint32_t p_index = chunk_append(chunk, p);
+                                if (p_index == UINT32_MAX) {
+                                    fprintf(stderr, "ERROR: chunk_append failed.\n");
+                                    return -1; 
+                                }
+                                p->chunk_state = CS_LR; 
+                                particle_update_chunkref(p, 1, chunk, p_index); 
+                            } else if (p->chunk_refs[0].chunk->top == chunk) {
+                                uint32_t p_index = chunk_append(chunk, p);
+                                if (p_index == UINT32_MAX) {
+                                    fprintf(stderr, "ERROR: chunk_append failed.\n");
+                                    return -1; 
+                                }
+                                p->chunk_state = CS_TB; 
+                                particle_update_chunkref(p, 2, chunk, p_index); 
+                                particle_update_chunkref(p, 3, p->chunk_refs[0].chunk, p->chunk_refs[0].p_index); 
+                            }
                         } break; 
-                        case TOP_BOTTOM: { 
-                            Chunk* chunk_top_right = p->chunk_ref[2].chunk->right; 
-                            Chunk* chunk_bottom_right = p->chunk_ref[3].chunk->right; 
+                        case CS_TB: { 
+                            Chunk* chunk_top_right = p->chunk_refs[2].chunk->right; 
+                            Chunk* chunk_bottom_right = p->chunk_refs[3].chunk->right; 
                             uint32_t p_index_top_right = chunk_append(chunk_top_right, p);
                             uint32_t p_index_bottom_right = chunk_append(chunk_bottom_right, p);
                             if (p_index_top_right == UINT32_MAX || p_index_bottom_right == UINT32_MAX) {
                                 fprintf(stderr, "ERROR: chunk_append failed.\n");
                                 return -1; 
                             }
-                            p->chunk_state = LRTB; 
-                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right);
-                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right);
+                            p->chunk_state = CS_LRTB; 
+                            particle_update_chunkref(p, 0, chunk_bottom_right, p_index_bottom_right);
+                            particle_update_chunkref(p, 1, chunk_top_right, p_index_top_right);
                         } break; 
-                        case LEFT_RIGHT: { 
-                            Chunk* chunk_top_left = p->chunk_ref[0].chunk->top; 
-                            Chunk* chunk_top_right = p->chunk_ref[1].chunk->top; 
-                            Chunk* chunk_bottom_right = p->chunk_ref[1].chunk; 
-                            Chunk* chunk_bottom_left = p->chunk_ref[0].chunk; 
+                        case CS_LR: { 
+                            Chunk* chunk_top_left = p->chunk_refs[0].chunk->top; 
+                            Chunk* chunk_top_right = p->chunk_refs[1].chunk->top; 
+                            Chunk* chunk_bottom_right = p->chunk_refs[1].chunk; 
+                            Chunk* chunk_bottom_left = p->chunk_refs[0].chunk; 
 
-                            uint32_t p_index_bottom_right = p->chunk_ref[1].p_index; 
-                            uint32_t p_index_bottom_left = p->chunk_ref[0].p_index; 
+                            uint32_t p_index_bottom_right = p->chunk_refs[1].p_index; 
+                            uint32_t p_index_bottom_left = p->chunk_refs[0].p_index; 
                             uint32_t p_index_top_left = chunk_append(chunk_top_left, p);
                             uint32_t p_index_top_right = chunk_append(chunk_top_right, p);
                             if (p_index_top_left == UINT32_MAX || p_index_top_right == UINT32_MAX) {
                                 fprintf(stderr, "ERROR: chunk_append failed.\n");
                                 return -1; 
                             }
-                            p->chunk_state = LRTB; 
-                            particle_update_chunk_ref(p, 0, chunk_bottom_right, p_index_bottom_right); 
-                            particle_update_chunk_ref(p, 1, chunk_top_right, p_index_top_right); 
-                            particle_update_chunk_ref(p, 2, chunk_top_left, p_index_top_left); 
-                            particle_update_chunk_ref(p, 3, chunk_bottom_left, p_index_bottom_left); 
+                            p->chunk_state = CS_LRTB; 
+                            particle_update_chunkref(p, 0, chunk_bottom_right, p_index_bottom_right); 
+                            particle_update_chunkref(p, 1, chunk_top_right, p_index_top_right); 
+                            particle_update_chunkref(p, 2, chunk_top_left, p_index_top_left); 
+                            particle_update_chunkref(p, 3, chunk_bottom_left, p_index_bottom_left); 
                         } break; 
-                        case LRTB: { // nothing to do here 
+                        case CS_LRTB: { // nothing to do here 
+                        } break; 
+                        default: {
+                            fprintf(stderr, "ERROR: Invalid chunk state\n");
+                            return -1; 
                         } break; 
                     }
+                } else {
                 }
             }
         } 
@@ -869,7 +981,111 @@ int setup_particles(
 }
 
 
+void setup_chunk(Chunkmap* chunkmap, uint32_t i, uint32_t j) {
+    Chunk* chunk = chunkmap->chunks[i][j]; 
+    chunk->particles = (Particle**)((char*)chunk + sizeof *chunk); 
+    memset(chunk->particles, 0, chunkmap->particles_max_per_chunk * sizeof chunk->particles[0]);
+    chunk->box.l = i*chunkmap->chunks_size.x; 
+    chunk->box.r = (i+1)*chunkmap->chunks_size.x;
+    chunk->box.b = j*chunkmap->chunks_size.y;
+    chunk->box.t = (j+1)*chunkmap->chunks_size.y;
+    /* printf("chunk:%p\n", (void*)chunk); */  
+    /* printf("chunk->x:%d chunk->y:%d\n", i, j); */  
+    /* printf("chunk->box:l=%f,r=%f,t=%f,b=%f\n", box_unpack(chunk->box)); */
+    chunk->left = NULL; 
+    chunk->right = NULL; 
+    chunk->bottom = NULL; 
+    chunk->top = NULL; 
+    chunk->particles_filled = 0; 
+    chunk->particles_free = chunkmap->particles_max_per_chunk;
+    chunk->x = i; 
+    chunk->y = j; 
+
+}
+
+
+int setup_simulation_memory(void** mem_block_ptr, Chunkmap* chunkmap) {
+    uint32_t nx = chunkmap->chunks_x; 
+    uint32_t ny = chunkmap->chunks_y; 
+    size_t total_size = 
+        chunkmap->border_chunks_n * sizeof chunkmap->border_chunks[0] +
+        nx * sizeof chunkmap->chunks[0] +
+        nx * ny * sizeof chunkmap->chunks[0][0] +
+        nx * ny * sizeof *chunkmap->chunks[0][0] + 
+        nx * ny * chunkmap->particles_max_per_chunk * sizeof chunkmap->chunks[0][0]->particles[0] +
+        chunkmap->particles_n * sizeof *chunkmap->chunks[0][0]->particles[0];  
+
+    char* mem_block = (void*)malloc(total_size);
+    if (mem_block == NULL) {
+        fprintf(stderr, "ERROR: malloc of memory block (size=%zu) failed.\n", total_size);
+        return -1;
+    }
+    printf("Allocated %zu bytes on heap.\n", total_size);
+    *mem_block_ptr = mem_block;
+
+    Chunk** border_chunks = (Chunk**)mem_block;
+    chunkmap->border_chunks = border_chunks;
+
+    Chunk*** chunks = (Chunk***)((char*)border_chunks + chunkmap->border_chunks_n * sizeof border_chunks[0]);
+    chunkmap->chunks = chunks; 
+
+    chunks[0] = (Chunk**)((char*)chunks + nx * sizeof chunkmap->chunks[0]); 
+    chunks[0][0] = (Chunk*)((char*)chunks[0] + nx * ny * sizeof chunks[0]); 
+    setup_chunk(chunkmap, 0, 0); 
+    for (uint32_t i = 1; i < nx; i++) {
+        chunks[i] = (Chunk**)((char*)chunks[i-1] + ny * sizeof chunks[0]); 
+        chunks[i][0] = (Chunk*)((char*)chunks[i-1][0] + ny * (sizeof *chunks[0][0] + chunkmap->particles_max_per_chunk * sizeof chunks[0][0]->particles[0]));
+        setup_chunk(chunkmap, i, 0); // 1,0 2,0 3,0  
+    }
+    for (uint32_t i = 0; i < nx; i++) {
+        for (uint32_t j = 1; j < ny; j++) {
+            chunks[i][j] = (Chunk*)((char*)chunks[i][j-1] + sizeof *chunks[0][0] + chunkmap->particles_max_per_chunk * sizeof chunks[0][0]->particles[0]); 
+            setup_chunk(chunkmap, i, j); // 0,1 0,2 0,3 ... 1,1 1,2,1,3 ... 2,1 
+        }
+    }
+
+    chunkmap->particles = (Particle*) ((char*)chunks[nx-1][ny-1] + sizeof *chunks[0][0] + chunkmap->particles_max_per_chunk * sizeof chunks[0][0]->particles[0]); 
+
+    uint32_t i_border_chunks = 0; 
+    for (uint32_t i = 0; i < nx; i++) {
+        for (uint32_t j = 0; j < ny; j++) {
+            bool is_border_chunk = false; 
+            if (i > 0) 
+                chunks[i][j]->left = chunks[i-1][j];
+            else if (!is_border_chunk) {
+                border_chunks[i_border_chunks] = chunks[i][j]; 
+                i_border_chunks++; 
+                is_border_chunk = true; 
+            }
+            if (j > 0) 
+                chunks[i][j]->bottom = chunks[i][j-1];
+            else if (!is_border_chunk) {
+                border_chunks[i_border_chunks] = chunks[i][j]; 
+                i_border_chunks++; 
+                is_border_chunk = true; 
+            }
+            if (i + 1 < chunkmap->chunks_x) 
+                chunks[i][j]->right = chunks[i+1][j];
+            else if (!is_border_chunk) {
+                border_chunks[i_border_chunks] = chunks[i][j]; 
+                i_border_chunks++; 
+                is_border_chunk = true; 
+            }
+            if (j + 1 < chunkmap->chunks_y) 
+                chunks[i][j]->top = chunks[i][j+1];
+            else if (!is_border_chunk) {
+                border_chunks[i_border_chunks] = chunks[i][j]; 
+                i_border_chunks++; 
+                is_border_chunk = true; 
+            }
+        }
+    }
+    return 0; 
+}
+
+
 int main(int argc, char* argv[]) {
+    srand(0); 
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "ERROR: SDL_Init failed: %s\n", SDL_GetError());
         return 1; 
@@ -887,7 +1103,7 @@ int main(int argc, char* argv[]) {
         return 1; 
     }
 
-    fprintf(stdout, "OK: Created device with driver '%s'\n", SDL_GetGPUDeviceDriver(device));
+    printf("OK: Created device with driver '%s'\n", SDL_GetGPUDeviceDriver(device));
     if (!SDL_ClaimWindowForGPUDevice(device, window)) {
         fprintf(stderr, "ERROR: SDL_ClaimWindowForGPUDevice failed: %s\n", SDL_GetError());
         return 1; 
@@ -1137,6 +1353,8 @@ int main(int argc, char* argv[]) {
         }
     );
 
+    float particle_radius = R; 
+
     // ---- [START] vulkan particle setup ----
     SDL_GPUBuffer*          particles_vertex_buffer = NULL; 
     SDL_GPUBuffer*          particles_index_buffer = NULL; 
@@ -1180,7 +1398,6 @@ int main(int argc, char* argv[]) {
 
     container.inverse_aspect_ratio = (float) container.height/container.width; 
     container.scalar = container.inverse_aspect_ratio * container.zoom; 
-    float particle_radius = R; 
     for (int i = 0; i < particles_n_vertices; i++) {
         particles_vertex_data[i].x *= container.inverse_aspect_ratio;   
         particles_vertex_data[i].x *= particle_radius*container.zoom;  
@@ -1197,12 +1414,22 @@ int main(int argc, char* argv[]) {
 
     vulkan_buffers_upload(device, particles_vertex_buffer, sizeof(PositionTextureVertex), particles_n_vertices, particles_index_buffer, particles_n_indices, particles_transfer_buffer);
 
-    uint32_t n_particles = N; // Depends on the GPU i guess, I have 8GB VRAM so 1 million should be fine 
+    Chunkmap chunkmap = { 0 };  
+    chunkmap.chunks_x = CHUNK_X; 
+    chunkmap.chunks_y = CHUNK_Y; 
+    chunkmap.border_chunks_n = 2 * (chunkmap.chunks_x+chunkmap.chunks_y) - 4; 
+    chunkmap.chunks_size.x = (float) container.width / chunkmap.chunks_x; 
+    chunkmap.chunks_size.y = (float) container.height / chunkmap.chunks_y; 
+    chunkmap.dimensions.x = (float) container.width;
+    chunkmap.dimensions.y = (float) container.height;
+    chunkmap.particles_max_per_chunk = new_max(2 * chunkmap.chunks_size.x * chunkmap.chunks_size.y / (particle_radius * particle_radius), 100); 
+    chunkmap.particles_n = N; 
+
     SDL_GPUBuffer* particles_sso_buffer = SDL_CreateGPUBuffer(
         device,
         &(SDL_GPUBufferCreateInfo) {
             .usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
-            .size = n_particles * sizeof(GPUParticle)
+            .size = chunkmap.particles_n * sizeof(GPUParticle)
         }
     );
 
@@ -1210,7 +1437,7 @@ int main(int argc, char* argv[]) {
         device,
         &(SDL_GPUTransferBufferCreateInfo) {
             .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
-            .size = n_particles * sizeof(GPUParticle)
+            .size = chunkmap.particles_n * sizeof(GPUParticle)
         }
     );
     // ---- [END] vulkan particle setup ----
@@ -1223,10 +1450,8 @@ int main(int argc, char* argv[]) {
 
     uint32_t debug_lines_n_vertices = 4; 
     uint32_t debug_lines_n_indices  = 4; 
-    ChunkmapInfo chunkmap_info = (ChunkmapInfo) {.n = (Vec2i) {.x = 20, .y = 16}, .size = (Vec2f) { .x = 0.0f, .y = 0.0f }};
-    chunkmap_info.size.x = (float) container.width / chunkmap_info.n.x; 
-    chunkmap_info.size.y = (float) container.height / chunkmap_info.n.y; 
-    uint32_t n_lines = chunkmap_info.n.x + chunkmap_info.n.y - 2; 
+
+    uint32_t n_lines = chunkmap.chunks_x + chunkmap.chunks_y - 2; 
     vulkan_buffers_create(device, &debug_lines_vertex_buffer, sizeof(Vec2Vertex), debug_lines_n_vertices, &debug_lines_index_buffer, debug_lines_n_indices, &debug_lines_transfer_buffer, (void**)&debug_lines_vertex_data);
 
     debug_lines_vertex_data[0] = (Vec2Vertex) { -1.0f, -1.0f };
@@ -1286,26 +1511,17 @@ int main(int argc, char* argv[]) {
     // Setup simulation 
     void* mem_block = NULL; 
 
-    Chunk*** chunkmap = NULL;
-
-    Chunk** border_chunks = NULL;
-    uint32_t n_border_chunks = 2 * (chunkmap_info.n.x+chunkmap_info.n.y) - 4; 
-    uint32_t n_max_particles_per_chunk = 2 * chunkmap_info.size.x * chunkmap_info.size.y / (particle_radius * particle_radius); 
-    printf("chunk_grid: (x:%d,y:%d)\n", chunkmap_info.n.x, chunkmap_info.n.y);
-    printf("n_max_particles_per_chunk:%d\n", n_max_particles_per_chunk);
-
-    Particle* particles = NULL; 
 
     printf("initializing memory...\n");
-    Destroyer destroyers[] = {
-        (Destroyer){
+    Pipeline_Bomber destroyers[] = {
+        (Pipeline_Bomber){
             .pipeline = particles_pipeline, 
             .vertex_buffer = particles_vertex_buffer, 
             .index_buffer = particles_index_buffer, 
             .sso_buffer = particles_sso_buffer, 
             .sso_transfer_buffer = particles_sso_transfer_buffer
         },
-        (Destroyer){
+        (Pipeline_Bomber){
             .pipeline = debug_lines_pipeline, 
             .vertex_buffer = debug_lines_vertex_buffer, 
             .index_buffer = debug_lines_index_buffer, 
@@ -1313,30 +1529,34 @@ int main(int argc, char* argv[]) {
             .sso_transfer_buffer = debug_lines_sso_transfer_buffer
         },
     }; 
-    if (setup_simulation_memory(&mem_block, &chunkmap, chunkmap_info, &border_chunks, n_border_chunks, n_max_particles_per_chunk, &particles, n_particles) < 0) {
+    if (setup_simulation_memory(&mem_block, &chunkmap) < 0) {
         destroy_sdl(device, window, destroyers, 2, debug_pipeline_maskee, texture_depth_stencil);  
         return 1; 
     }
     printf("memory initialized successfully!\n");
+    chunkmap_print(&chunkmap, "");
 
-    if (setup_particles(chunkmap, chunkmap_info, particles, n_particles, particle_radius, &container) < 0) {
+
+    printf("setting up particles...\n");
+    if (setup_particles(&chunkmap, particle_radius, &container) < 0) {
         fprintf(stderr, "ERROR: sim setup failed.\n");
         free(mem_block);
         destroy_sdl(device, window, destroyers, 2, debug_pipeline_maskee, texture_depth_stencil);  
         return 1; 
     }
-    printf("%d particles initialized!\n", n_particles);
+    printf("%d particles initialized!\n", chunkmap.particles_n);
 
-    uint32_t sim_state = 0; 
-    float dt = 0.001f; 
+    SimState sim_state = SIM_PAUSED; 
+    float dt = DT;  
 
     bool quit = false; 
-    bool debug_mode = true; 
+    bool debug_mode = false; 
+    uint32_t steps = 0; 
 
     while (!quit) {
         SDL_Event event;
         if (SDL_PollEvent(&event)) 
-            handle_event(event, &quit, &debug_mode, &sim_state); 
+            event_handle(event, &quit, &debug_mode, &sim_state, &steps, &dt); 
 
         SDL_GPUCommandBuffer* cmdbuf = SDL_AcquireGPUCommandBuffer(device);
         if (cmdbuf == NULL) {
@@ -1355,19 +1575,35 @@ int main(int argc, char* argv[]) {
             SDL_SubmitGPUCommandBuffer(cmdbuf);
             break; 
         }
-        
-        if (sim_state == 1) {
-            if (physics_tick(dt, particles, n_particles, particle_radius, &container, chunkmap, chunkmap_info, border_chunks, n_border_chunks) < 0) {
-                fprintf(stderr, "ERROR: physics_tick, stopping simulation.\n"); 
-                sim_state = 0; 
-            }  
+
+        switch (sim_state) {
+            case SIM_RUNNING: {
+                if (physics_tick(dt, &chunkmap, particle_radius, &container) < 0) {
+                    fprintf(stderr, "ERROR: physics_tick, stopping simulation.\n"); 
+                    sim_state = SIM_STOPPED; 
+                }  
+            } break; 
+            case SIM_PAUSED: {
+                while (steps > 0) {
+                    printf("Stepping 1\n");
+                    if (physics_tick(dt, &chunkmap, particle_radius, &container) < 0) {
+                        fprintf(stderr, "ERROR: physics_tick, stopping simulation.\n"); 
+                        sim_state = SIM_STOPPED; 
+                    }  
+                    steps--; 
+                }
+            } break; 
+            case SIM_STOPPED: {
+
+            } break; 
+            default: {
+                fprintf(stderr, "Sim state invalid.\n"); 
+            } break; 
         }
-
-
-        GPUParticle* live_data = SDL_MapGPUTransferBuffer(device, particles_sso_transfer_buffer, true);
-        for (uint32_t i = 0; i < n_particles; i+=1) {
-            live_data[i].x = particles[i].gpu.x;
-            live_data[i].y = particles[i].gpu.y;
+        GPUParticle* particles_sso_data = SDL_MapGPUTransferBuffer(device, particles_sso_transfer_buffer, true);
+        for (uint32_t i = 0; i < chunkmap.particles_n; i+=1) {
+            particles_sso_data[i].x = chunkmap.particles[i].gpu.x;
+            particles_sso_data[i].y = chunkmap.particles[i].gpu.y;
         }
         SDL_UnmapGPUTransferBuffer(device, particles_sso_transfer_buffer); 
         SDL_GPUCopyPass* copy_pass = NULL; 
@@ -1381,7 +1617,7 @@ int main(int argc, char* argv[]) {
             &(SDL_GPUBufferRegion) {
                 .buffer = particles_sso_buffer,
                 .offset = 0,
-                .size = sizeof(GPUParticle) * n_particles
+                .size = sizeof(GPUParticle) * chunkmap.particles_n 
             },
             false   
         );
@@ -1389,13 +1625,13 @@ int main(int argc, char* argv[]) {
 
 
         GPULine* debug_lines_data = SDL_MapGPUTransferBuffer(device, debug_lines_sso_transfer_buffer, true);
-        for (uint32_t i = 0; i < chunkmap_info.n.x - 1; i+=1) { // vertical 
-            debug_lines_data[i].x = 2 * (float)(i + 1) / (chunkmap_info.n.x); 
+        for (uint32_t i = 0; i < chunkmap.chunks_x - 1; i+=1) { // vertical 
+            debug_lines_data[i].x = 2 * (float)(i + 1) / (chunkmap.chunks_x); 
             debug_lines_data[i].flags = 0; 
         }
-        for (uint32_t i = chunkmap_info.n.x - 1; i < n_lines; i+=1) { // horizontal 
-            uint32_t index = i - chunkmap_info.n.x + 1; 
-            debug_lines_data[i].y = 2 * (float)(index + 1) / (chunkmap_info.n.y); 
+        for (uint32_t i = chunkmap.chunks_x - 1; i < n_lines; i+=1) { // horizontal 
+            uint32_t index = i - chunkmap.chunks_x + 1; 
+            debug_lines_data[i].y = 2 * (float)(index + 1) / (chunkmap.chunks_y); 
             debug_lines_data[i].flags = 1; 
         }
         SDL_UnmapGPUTransferBuffer(device, debug_lines_sso_transfer_buffer); 
@@ -1422,15 +1658,15 @@ int main(int argc, char* argv[]) {
         color_target_info.store_op    = SDL_GPU_STOREOP_STORE;
         color_target_info.cycle       = false;
 
-        SDL_GPUDepthStencilTargetInfo depth_stencil_target_info = { 0 };
-        depth_stencil_target_info.texture           = texture_depth_stencil;
-        depth_stencil_target_info.clear_depth       = 0.0f;
-        depth_stencil_target_info.load_op           = SDL_GPU_LOADOP_CLEAR;
-        depth_stencil_target_info.store_op          = SDL_GPU_STOREOP_DONT_CARE;
-        depth_stencil_target_info.stencil_load_op   = SDL_GPU_LOADOP_CLEAR;
-        depth_stencil_target_info.stencil_store_op  = SDL_GPU_STOREOP_DONT_CARE;
-        depth_stencil_target_info.cycle             = true;
-        depth_stencil_target_info.clear_stencil     = 0;
+        /* SDL_GPUDepthStencilTargetInfo depth_stencil_target_info = { 0 }; */
+        /* depth_stencil_target_info.texture           = texture_depth_stencil; */
+        /* depth_stencil_target_info.clear_depth       = 0.0f; */
+        /* depth_stencil_target_info.load_op           = SDL_GPU_LOADOP_CLEAR; */
+        /* depth_stencil_target_info.store_op          = SDL_GPU_STOREOP_DONT_CARE; */
+        /* depth_stencil_target_info.stencil_load_op   = SDL_GPU_LOADOP_CLEAR; */
+        /* depth_stencil_target_info.stencil_store_op  = SDL_GPU_STOREOP_DONT_CARE; */
+        /* depth_stencil_target_info.cycle             = true; */
+        /* depth_stencil_target_info.clear_stencil     = 0; */
 
         SDL_GPURenderPass* render_pass = SDL_BeginGPURenderPass(cmdbuf, &color_target_info, 1, NULL);  // , &depth_stencil_target_info);
 
@@ -1488,7 +1724,7 @@ int main(int argc, char* argv[]) {
                 }, 
                 SDL_GPU_INDEXELEMENTSIZE_16BIT
             );
-            SDL_DrawGPUIndexedPrimitives(render_pass, particles_n_indices, n_particles, 0, 0, 0);
+            SDL_DrawGPUIndexedPrimitives(render_pass, particles_n_indices, chunkmap.particles_n, 0, 0, 0);
         }
 
         SDL_EndGPURenderPass(render_pass);

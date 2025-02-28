@@ -3,3 +3,5 @@ shaders/compiled
 build/*  
 *.log 
 linux_dxc/
+log.txt 
+perf.data* 

@@ -1,5 +1,6 @@
 struct Particle { 
     float2 Position; 
+    float2 padd; 
 };
 
 StructuredBuffer<Particle> ParticleDataBuffer: register(t0, space0);
@@ -31,6 +32,7 @@ Output main(Input input)
     output.Color1 = input.Color1;  
     output.Color2 = input.Color2;  
     output.Position = float4(x, y, 0.0f, 1.0f); 
+    // output.Position = float4(input.Position.x-0.5f, input.Position.y-0.5f, 0.0f, 1.0f); 
 	output.PointSize = 40.0f; 
     output.UV = input.UV - 0.5f; 
     return output;

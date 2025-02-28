@@ -31,6 +31,9 @@ typedef struct Vec2Vertex {
 } Vec2Vertex;
 
 
+float rand_float(float min, float max);
+
+
 SDL_GPUShader* load_shader(
     SDL_GPUDevice* device, 
     const char* filename, 
@@ -39,5 +42,26 @@ SDL_GPUShader* load_shader(
     Uint32 uniform_buffer_count, 
     Uint32 storage_buffer_count, 
     Uint32 storage_texture_count); 
+
+
+void vulkan_buffers_upload(
+    SDL_GPUDevice* device, 
+    SDL_GPUBuffer* vertex_buffer, 
+    size_t vertex_size, 
+    uint32_t n_vertices, 
+    SDL_GPUBuffer* index_buffer, 
+    uint32_t n_indices, 
+    SDL_GPUTransferBuffer* transfer_buffer);  
+
+
+void vulkan_buffers_create(
+    SDL_GPUDevice* device, 
+    SDL_GPUBuffer** vertex_buffer_ptr,
+    size_t vertex_size,
+    uint32_t n_vertices,
+    SDL_GPUBuffer** index_buffer_ptr,
+    uint32_t n_indices,
+    SDL_GPUTransferBuffer** transfer_buffer_ptr,
+    void** transfer_data_ptr);
 
 #endif 

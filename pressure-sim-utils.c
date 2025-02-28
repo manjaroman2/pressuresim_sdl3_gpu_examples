@@ -1,6 +1,6 @@
 #include "pressure-sim-utils.h"
 #include <stdio.h>
-
+#include <stdlib.h> 
 
 const SDL_FColor COLOR_TRANSPARENT = { 0.0f, 0.0f, 0.0f, 0.0f }; 
 const SDL_FColor COLOR_WHITE       = { 1.0f, 1.0f, 1.0f, 1.0f }; 
@@ -12,6 +12,11 @@ const SDL_FColor COLOR_CYAN        = { 0.0f, 1.0f, 1.0f, 1.0f };
 const SDL_FColor COLOR_YELLOW      = { 1.0f, 1.0f, 0.0f, 1.0f }; 
 const SDL_FColor COLOR_PINK        = { 1.0f, 0.0f, 1.0f, 1.0f }; 
 const SDL_FColor COLOR_GRAY        = { RGBA_TO_FLOAT(36, 36, 36, 255) }; 
+
+
+float rand_float(float min, float max) {
+    return min + (max - min) * (rand() / (float)RAND_MAX);
+}
 
 
 SDL_GPUShader* load_shader(
@@ -62,3 +67,78 @@ SDL_GPUShader* load_shader(
     SDL_free(code); 
     return shader; 
 } 
+
+
+void vulkan_buffers_upload(SDL_GPUDevice* device, SDL_GPUBuffer* vertex_buffer, size_t vertex_size, uint32_t n_vertices, SDL_GPUBuffer* index_buffer, uint32_t n_indices, SDL_GPUTransferBuffer* transfer_buffer) {
+    SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
+    SDL_GPUCommandBuffer* upload_cmdbuf = SDL_AcquireGPUCommandBuffer(device);
+    SDL_GPUCopyPass* copy_pass = SDL_BeginGPUCopyPass(upload_cmdbuf);
+    SDL_UploadToGPUBuffer(
+        copy_pass,
+        &(SDL_GPUTransferBufferLocation) {
+            .transfer_buffer = transfer_buffer,
+            .offset = 0
+        },
+        &(SDL_GPUBufferRegion) {
+            .buffer = vertex_buffer,
+            .offset = 0,
+            .size = vertex_size * n_vertices 
+        },
+        false
+    );
+    SDL_UploadToGPUBuffer(
+        copy_pass,
+        &(SDL_GPUTransferBufferLocation) {
+            .transfer_buffer = transfer_buffer,
+            .offset = vertex_size * n_vertices
+        },
+        &(SDL_GPUBufferRegion) {
+            .buffer = index_buffer,
+            .offset = 0,
+            .size = sizeof(uint16_t) * n_indices
+        },
+        false
+    );
+    SDL_EndGPUCopyPass(copy_pass);
+    SDL_SubmitGPUCommandBuffer(upload_cmdbuf);
+    SDL_ReleaseGPUTransferBuffer(device, transfer_buffer);
+}
+
+
+void vulkan_buffers_create(
+    SDL_GPUDevice* device, 
+    SDL_GPUBuffer** vertex_buffer_ptr,
+    size_t vertex_size,
+    uint32_t n_vertices,
+    SDL_GPUBuffer** index_buffer_ptr,
+    uint32_t n_indices,
+    SDL_GPUTransferBuffer** transfer_buffer_ptr,
+    void** transfer_data_ptr) {
+
+    *vertex_buffer_ptr = SDL_CreateGPUBuffer( // this is safe!
+        device, 
+        &(SDL_GPUBufferCreateInfo) {
+            .usage = SDL_GPU_BUFFERUSAGE_VERTEX, 
+            .size = vertex_size * n_vertices
+        }
+    ); 
+
+    *index_buffer_ptr = SDL_CreateGPUBuffer(
+        device, 
+        &(SDL_GPUBufferCreateInfo) {
+            .usage = SDL_GPU_BUFFERUSAGE_INDEX, 
+            .size = sizeof(uint16_t) * n_indices 
+        }
+    ); 
+
+    *transfer_buffer_ptr = SDL_CreateGPUTransferBuffer( // this is safe!
+        device,
+        &(SDL_GPUTransferBufferCreateInfo) {
+            .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+            .size = (vertex_size * n_vertices) + (sizeof(uint16_t) * n_indices)
+        }
+    );
+
+    *transfer_data_ptr = SDL_MapGPUTransferBuffer(device, *transfer_buffer_ptr, false);
+}
+
