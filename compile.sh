@@ -7,6 +7,9 @@ clear
 
 mkdir -p build/
 rm -f build/*
+echo "Compile.sh"
+echo "build/"
+ls -l build/
 
 CC="clang"
 # CC="gcc"
@@ -17,7 +20,7 @@ LINKFLAGS_DEBUG="-lSDL3 -lm -g"
 # export LD_LIBRARY_PATH=~/src/SDL/build:$LD_LIBRARY_PATH
 # export C_INCLUDE_PATH=~/src/SDL/include:$C_INCLUDE_PATH
 # export PKG_CONFIG_PATH=~/src/SDL/build:$PKG_CONFIG_PATH
-pkg-config --modversion sdl3
+echo sdl3 version: $(pkg-config --modversion sdl3)
 CFLAGS=$CFLAGS_DEBUG
 LINKFLAGS=$LINKFLAGS_DEBUG
 # CFLAGS=$CFLAGS_RELEASE
@@ -31,7 +34,5 @@ fi
 
 $CC $CFLAGS -c $1.c -o build/$1.o
 $CC $CFLAGS $LINKFLAGS $LINKS build/$1.o -o build/$1.bin
-ls -l ./build/$1.bin
-file ./build/$1.bin
-# ./build/$1.bin
+ls build/
 
